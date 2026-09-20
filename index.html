@@ -1026,13 +1026,13 @@
   const DEFENSE_Y = GAME_HEIGHT - 26;
 
   // プレイヤー
-  // speed: 道路幅=360px ÷ 5秒 ÷ 60fps ≒ 1.2px/frame
+  // speed: 道路幅=360px ÷ 3秒 ÷ 60fps ≒ 2.0px/frame
   const player = {
     x: GAME_WIDTH / 2,
     y: DEFENSE_Y - 75, // 操作ボタン群の真上、防衛ラインの手前
     width: 38,
     height: 48,
-    speed: 1.2,
+    speed: 2.0,
     shootCooldown: 0,
     shootInterval: 12, // 通常フレーム間隔
     // パワーアップ状態
