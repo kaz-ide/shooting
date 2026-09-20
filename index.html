@@ -1101,6 +1101,7 @@
   let explosions = [];  // ボム大爆発 & 爆発
   let hitEffects = [];  // パーティクル
   let popupTexts = [];  // 残りスタミナ等の数値ポップアップ
+  let zakoExplosions = []; // ザコ敵撃破時の超軽量2コマ連番爆発スプライト
 
   // ボム用フラッシュ（黒ボム: 弱め白 / 赤ボム: 強烈赤フラッシュ）
   let bombFlashAlpha = 0;
@@ -1155,8 +1156,79 @@
     }
   }
 
+  // ===== オフスクリーンCanvas（ザコ爆発2コマ連番スプライト事前キャッシュ）=====
+  const explosionSprites = [];
+
+  function initExplosionSprites() {
+    const size = 36;
+    const half = size / 2;
+
+    // パターン1: 弾けた瞬間の小〜中サイズの閃光（ギザギザした星型・トゲ状の光）
+    const c1 = document.createElement('canvas');
+    c1.width = size;
+    c1.height = size;
+    const ctx1 = c1.getContext('2d');
+
+    ctx1.beginPath();
+    const spikes = 10;
+    const outerR = 14;
+    const innerR = 4.5;
+    for (let i = 0; i < spikes * 2; i++) {
+      const r = (i % 2 === 0) ? outerR : innerR;
+      const angle = (i * Math.PI) / spikes;
+      const x = half + Math.cos(angle) * r;
+      const y = half + Math.sin(angle) * r;
+      if (i === 0) ctx1.moveTo(x, y);
+      else ctx1.lineTo(x, y);
+    }
+    ctx1.closePath();
+    ctx1.fillStyle = '#fffae0';
+    ctx1.fill();
+    ctx1.lineWidth = 1.2;
+    ctx1.strokeStyle = '#ff9900';
+    ctx1.stroke();
+
+    // 中央コアの白熱閃光
+    ctx1.beginPath();
+    ctx1.arc(half, half, 4, 0, Math.PI * 2);
+    ctx1.fillStyle = '#ffffff';
+    ctx1.fill();
+
+    explosionSprites[0] = { canvas: c1, half: half };
+
+    // パターン2: 少し広がった丸みのある爆風・煙（オレンジ〜黄色の爆煙）
+    const c2 = document.createElement('canvas');
+    c2.width = size;
+    c2.height = size;
+    const ctx2 = c2.getContext('2d');
+
+    // 外側の爆煙（複数重なる丸い煙玉・オレンジ〜赤橙色）
+    const puffs = [
+      { x: half, y: half, r: 15, fill: '#ff4400' },
+      { x: half - 6, y: half - 5, r: 10, fill: '#ff5500' },
+      { x: half + 6, y: half - 4, r: 9.5, fill: '#ff6600' },
+      { x: half - 4, y: half + 6, r: 10, fill: '#ff5500' },
+      { x: half + 5, y: half + 5, r: 9, fill: '#ff6600' },
+      // 内側の高温爆風（黄色〜明黄）
+      { x: half, y: half, r: 9, fill: '#ffaa00' },
+      { x: half - 2, y: half - 2, r: 6, fill: '#ffdd00' },
+      { x: half + 2, y: half + 1, r: 5, fill: '#ffff66' },
+      { x: half, y: half, r: 3, fill: '#ffffff' }
+    ];
+
+    puffs.forEach(p => {
+      ctx2.beginPath();
+      ctx2.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx2.fillStyle = p.fill;
+      ctx2.fill();
+    });
+
+    explosionSprites[1] = { canvas: c2, half: half };
+  }
+
   // 起動時に事前生成
   initEnemySprites();
+  initExplosionSprites();
 
   // スポーンタイマー
   let enemySpawnTimer = 0;
@@ -1182,6 +1254,7 @@
     explosions = [];
     hitEffects = [];
     popupTexts = [];
+    zakoExplosions = [];
     enemySpawnTimer = 0;
     supplySpawnTimer = 300; // 最初のアイテムを5秒後に出す
     // 中ボス: 10秒禁止(600f) + 次回インターバル(900f) = 1500f待ち
@@ -1222,6 +1295,7 @@
         e.hp -= damage;
         if (e.hp <= 0) {
           score += e.maxHp * 15;
+          zakoExplosions.push({ x: Math.round(e.x), y: Math.round(e.y), frame: 1 });
         } else {
           // 被弾変色: 黒 -> 灰 -> 白
           const chp = Math.ceil(e.hp);
@@ -1250,7 +1324,7 @@
       }
     });
 
-    // 障害物（金属板・バギュラ）にも中ボス同様のボムダメージを適用
+    // 障害物（防壁プレート）にも中ボス同様のボムダメージを適用
     supplyBoxes.forEach(box => {
       if (box.type === 'obstacle') {
         const dmg = isRed ? 35 : 12;
@@ -1259,7 +1333,7 @@
         if (box.hp <= 0) {
           score += 1000;
           createExplosion(box.x, box.y, 45, '#00f7ff');
-          createPopupText(box.x, box.y - 45, '★ BACULA 撃破! +1,000 PTS ★', '#00f7ff');
+          createPopupText(box.x, box.y - 45, '★ METAL PLATE 撃破! +1,000 PTS ★', '#00f7ff');
           if (bombs.length >= 3) bombs.shift();
           bombs.push('red');
           updateHUD();
@@ -1349,7 +1423,7 @@
     } else if (rnd < 0.80) {
       boxType = 'bomb_red';
     } else {
-      // 障害物: 金属板（ゼビウスのバギュラ）。固さは中ボスと完全に同じ！
+      // 障害物: 金属板（防壁プレート）。固さは中ボスと完全に同じ！
       boxType = 'obstacle';
       boxHp = 80 + Math.floor(gameElapsed * 0.6); // 中ボス(TANK)と同じHP計算式
       bWidth = 52;
@@ -1483,21 +1557,6 @@
       decay: 0.05,
       color: color || '#ff9900'
     });
-    // スパーク破片
-    for (let i = 0; i < 12; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const spd = 1 + Math.random() * 4;
-      hitEffects.push({
-        x: x,
-        y: y,
-        vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd,
-        life: 1.0,
-        decay: 0.04 + Math.random() * 0.04,
-        color: color || '#ffaa00',
-        size: 2 + Math.random() * 3
-      });
-    }
   }
 
   function createPopupText(x, y, text, color) {
@@ -1724,7 +1783,7 @@
           }
         }
 
-        // 障害物（金属板・バギュラ）にもレーザー照射がヒット
+        // 障害物（防壁プレート）にもレーザー照射がヒット
         supplyBoxes.forEach(box => {
           if (box.type === 'obstacle' && Math.abs(box.x - player.x) <= box.width / 2 + 8 &&
               box.y >= startY - laserLength && box.y <= startY) {
@@ -1936,12 +1995,12 @@
             createPopupText(player.x, player.y - 45, discarded ? '黒ボム獲得! (先頭破棄)' : '黒ボム獲得! [全体1ダメ]', '#ffffff');
           }
         } else if (box.type === 'obstacle') {
-          // 障害物（金属板・ゼビウスのバギュラ）撃破！
+          // 障害物（金属板・防壁プレート）撃破！
           sfx.explode();
           createExplosion(box.x, box.y, 48, '#00f7ff');
           createExplosion(box.x, box.y, 28, '#ffffff');
           score += 1000;
-          createPopupText(box.x, box.y - 45, '★ BACULA 撃破! +1,000 PTS ★', '#00f7ff');
+          createPopupText(box.x, box.y - 45, '★ METAL PLATE 撃破! +1,000 PTS ★', '#00f7ff');
           // 撃破ボーナス: 赤ボム獲得！
           if (bombs.length >= 3) bombs.shift();
           bombs.push('red');
@@ -2046,7 +2105,8 @@
       if (e.hp <= 0) {
         if (e.type === 'normal') {
           score += e.maxHp * 15;
-          createExplosion(e.x, e.y, e.radius, e.colorType === 'white' ? '#ffffff' : (e.colorType === 'gray' ? '#aaaaaa' : '#555555'));
+          sfx.explode();
+          zakoExplosions.push({ x: Math.round(e.x), y: Math.round(e.y), frame: 1 });
         } else if (e.type === 'midboss') {
           score += 500;
           screenShake = 14;
@@ -2075,6 +2135,15 @@
         createExplosion(e.x, DEFENSE_Y, 80, '#ff0033');
         showEndModal(false);
         return;
+      }
+    }
+
+    // ザコ敵爆発スプライトアニメーション更新（固定座標・2コマ連番）
+    for (let i = zakoExplosions.length - 1; i >= 0; i--) {
+      const ze = zakoExplosions[i];
+      ze.frame++;
+      if (ze.frame >= 5) {
+        zakoExplosions.splice(i, 1);
       }
     }
 
@@ -2345,7 +2414,7 @@
       ctx.translate(box.x, box.y + Math.sin(box.bob) * 3);
 
       if (box.type === 'obstacle') {
-        // ゼビウスのバギュラ（金属板障害物）の3D水平回転描画
+        // 金属板障害物（防壁プレート）の3D水平回転描画
         const angle = box.rotAngle || 0;
         const cosA = Math.cos(angle);
         const absCos = Math.abs(cosA);
@@ -2392,12 +2461,12 @@
           ctx.lineWidth = 1;
           ctx.strokeRect(-w * 0.28, -h * 0.25, w * 0.56, h * 0.5);
 
-          // テキスト「BACULA」
-          ctx.font = 'bold 9px monospace';
+          // 装飾パネル・識別テキスト「ARMOR」
+          ctx.font = 'bold 8.5px monospace';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#ffffff';
-          ctx.fillText('BACULA', 0, 0);
+          ctx.fillText('ARMOR', 0, 0);
         }
 
         // 耐久ゲージ（中ボス並みの超高HPゲージ: シアン〜黄色〜赤）
@@ -2782,6 +2851,17 @@
 
   /* --- エフェクト & 大爆発描画 --- */
   function drawEffects() {
+    // ザコ敵撃破時の超軽量2コマ連番スプライト描画（画像差し替えのみ・固定座標）
+    if (zakoExplosions.length > 0) {
+      const spr1 = explosionSprites[0];
+      const spr2 = explosionSprites[1];
+      for (let i = 0; i < zakoExplosions.length; i++) {
+        const ze = zakoExplosions[i];
+        const spr = (ze.frame <= 2) ? spr1 : spr2;
+        ctx.drawImage(spr.canvas, ze.x - spr.half, ze.y - spr.half);
+      }
+    }
+
     // ヒット火花
     hitEffects.forEach(p => {
       ctx.fillStyle = p.color;
