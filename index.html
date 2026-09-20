@@ -182,7 +182,8 @@
       align-items: center;
       z-index: 30;
       text-align: center;
-      padding: 24px;
+      padding: 16px 20px;
+      overflow-y: auto;
       opacity: 1;
       transition: opacity 0.3s ease;
     }
@@ -198,14 +199,14 @@
       color: #ffcc00;
       text-transform: uppercase;
       letter-spacing: 2px;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
       text-shadow: 0 0 15px rgba(255, 204, 0, 0.7), 0 2px 4px #000;
     }
 
     .game-subtitle {
-      font-size: 13px;
+      font-size: 12px;
       color: #8b949e;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
       letter-spacing: 1px;
     }
 
@@ -308,12 +309,13 @@
       background: rgba(22, 27, 34, 0.8);
       border: 1px solid #30363d;
       border-radius: 10px;
-      padding: 12px 16px;
-      font-size: 11.5px;
-      line-height: 1.6;
+      padding: 10px 14px;
+      font-size: 11px;
+      line-height: 1.5;
       color: #c9d1d9;
       text-align: left;
-      margin-top: 18px;
+      margin-top: 14px;
+      width: 100%;
       max-width: 320px;
     }
 
@@ -428,20 +430,12 @@
     <button id="btnStart" class="btn-action">GAME START</button>
 
     <div class="rules-card">
-      ・<strong>メニュー操作:</strong> [↑][↓][←][→]キーで選択、[Space]で決定、[Enter]で即スタート<br>
-      ・<strong>コントローラー (Gamepad):</strong> [十字キー/左スティック] 移動・選択、[A(×)/X(□)] ボム、[A(×)/START] 決定・即スタート<br>
       ・<span class="danger-text">防衛敗北:</span> 敵が1体でも最下部ラインを越えたら即GAME OVER<br>
-      ・<strong>攻撃:</strong> 自動射撃（横並びの弾はザコに1列ずつ消費され、他列は奥へ直進貫通）<br>
-      ・<strong>移動:</strong> [←][→]キー / ゲームパッド / 画面クリック / 画面下ボタン<br>
-      ・<strong>ボム:</strong> [Space]キー / [💣]ボタン (最大3個ストック・満タン時最古破棄)<br>
-      &nbsp;&nbsp;💣<strong>黒ボム:</strong> 画面全体に弾1発分ダメージ（弱フラッシュ / 黒→灰→白）<br>
-      &nbsp;&nbsp;<span style="color:#ff4444;">💣</span><strong>赤ボム:</strong> 画面全体に弾3発分ダメージ（強烈フラッシュ / 全ザコ一網打尽）<br>
-      &nbsp;&nbsp;※中ボス爆破時に黒ボム、大ボス爆破時に赤ボムが全域誘爆！<br>
-      ・<strong>補給コンテナ:</strong> 左右を横切るボックスを撃破でパワーアップ！<br>
-      &nbsp;&nbsp;<span style="color:#00ffcc">S</span>: ショット強化 (通常最大Lv.5 / HARD・DEVIL限定でLv.7貫通青レーザー開放)<br>
-      &nbsp;&nbsp;<span style="color:#00f7ff">O</span>: オプション追加 (左右交互・最大6個・最大4段階/3列Lv連動)<br>
-      &nbsp;&nbsp;💣: ボム補充（黒ボム・赤ボムがランダム出現）<br>
-      ・<strong>弾Lv.6・Lv.7:</strong> Lv.6(7方向)・Lv.7(画面90%青レーザー貫通)は「HARD」「DEVIL」でのみ開放！
+      ・<strong>操作:</strong> [←][→]/スティックで移動、自動射撃（横並び弾は1列ずつ消費・奥へ貫通）<br>
+      ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
+      &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体3ダメ/ザコ全滅)</span> ※ボス撃破で自動誘爆<br>
+      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化・最大Lv.7青レーザー※HARD/DEVIL限定) / <span style="color:#00f7ff">O</span>(最大6個) / 💣(補充)<br>
+      ・<strong>メニュー/パッド:</strong> [十字キー/矢印] 選択、[Enter/START/A] 即スタート
     </div>
   </div>
 
