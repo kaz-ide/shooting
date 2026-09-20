@@ -266,6 +266,20 @@
       box-shadow: 0 0 14px rgba(255, 123, 114, 0.6);
     }
 
+    /* キーボード操作時のフォーカス強調表示 */
+    .btn-time.focused, .btn-density.focused, .btn-action.focused {
+      outline: 3px solid #00f7ff !important;
+      box-shadow: 0 0 18px rgba(0, 247, 255, 0.9) !important;
+      transform: scale(1.04);
+    }
+
+    /* ゲームプレイ中のマウスカーソル完全非表示 */
+    #game-container.playing,
+    #game-container.playing canvas,
+    #game-container.playing * {
+      cursor: none !important;
+    }
+
     .btn-action {
       background: linear-gradient(135deg, #238636, #2ea043);
       border: 1px solid rgba(240, 246, 252, 0.2);
@@ -403,26 +417,31 @@
       <button class="btn-time" data-seconds="600">10分</button>
     </div>
 
-    <span class="selection-label">② 敵の出現量（密集度）</span>
+    <span class="selection-label">② 難易度（DIFFICULTY）</span>
     <div class="option-group" id="densityGroup">
-      <button class="btn-density selected" data-density="normal">並 (標準)</button>
-      <button class="btn-density" data-density="hard">大 (多め)</button>
-      <button class="btn-density" data-density="expert">特大 (大群)</button>
-      <button class="btn-density" data-density="mega">メガ (極限)</button>
+      <button class="btn-density selected" data-density="normal">EASY</button>
+      <button class="btn-density" data-density="hard">NORMAL</button>
+      <button class="btn-density" data-density="expert">HARD</button>
+      <button class="btn-density" data-density="mega">DEVIL</button>
     </div>
 
     <button id="btnStart" class="btn-action">GAME START</button>
 
     <div class="rules-card">
+      ・<strong>メニュー操作:</strong> [↑][↓][←][→]キーで選択、[Space]で決定、[Enter]で即スタート<br>
+      ・<strong>コントローラー (Gamepad):</strong> [十字キー/左スティック] 移動・選択、[A(×)/X(□)] ボム、[A(×)/START] 決定・即スタート<br>
       ・<span class="danger-text">防衛敗北:</span> 敵が1体でも最下部ラインを越えたら即GAME OVER<br>
-      ・<strong>攻撃:</strong> 自動射撃（射程制限なし・画面上端まで直進）<br>
-      ・<strong>移動:</strong> [←][→]キー / 画面クリック / 画面下ボタン<br>
-      ・<strong>ボム:</strong> [Space]キー / [💣]ボタン (画面閃光ホワイトアウトでザコ即消滅+中ボスHP半減)<br>
+      ・<strong>攻撃:</strong> 自動射撃（横並びの弾はザコに1列ずつ消費され、他列は奥へ直進貫通）<br>
+      ・<strong>移動:</strong> [←][→]キー / ゲームパッド / 画面クリック / 画面下ボタン<br>
+      ・<strong>ボム:</strong> [Space]キー / [💣]ボタン (最大3個ストック・満タン時最古破棄)<br>
+      &nbsp;&nbsp;💣<strong>黒ボム:</strong> 画面全体に弾1発分ダメージ（弱フラッシュ / 黒→灰→白）<br>
+      &nbsp;&nbsp;<span style="color:#ff4444;">💣</span><strong>赤ボム:</strong> 画面全体に弾3発分ダメージ（強烈フラッシュ / 全ザコ一網打尽）<br>
+      &nbsp;&nbsp;※中ボス爆破時に黒ボム、大ボス爆破時に赤ボムが全域誘爆！<br>
       ・<strong>補給コンテナ:</strong> 左右を横切るボックスを撃破でパワーアップ！<br>
-      &nbsp;&nbsp;<span style="color:#00ffcc">S</span>: ショット強化 (通常最大Lv.5 / 特大・メガ限定でLv.7貫通青レーザー開放)<br>
+      &nbsp;&nbsp;<span style="color:#00ffcc">S</span>: ショット強化 (通常最大Lv.5 / HARD・DEVIL限定でLv.7貫通青レーザー開放)<br>
       &nbsp;&nbsp;<span style="color:#00f7ff">O</span>: オプション追加 (左右交互・最大6個・最大4段階/3列Lv連動)<br>
-      &nbsp;&nbsp;<span style="color:#ff9900">💣</span>: ボム補充<br>
-      ・<strong>弾Lv.6・Lv.7:</strong> Lv.6(7方向)・Lv.7(画面90%青レーザー貫通)は「特大」「メガ」でのみ開放！
+      &nbsp;&nbsp;💣: ボム補充（黒ボム・赤ボムがランダム出現）<br>
+      ・<strong>弾Lv.6・Lv.7:</strong> Lv.6(7方向)・Lv.7(画面90%青レーザー貫通)は「HARD」「DEVIL」でのみ開放！
     </div>
   </div>
 
@@ -574,6 +593,7 @@
   canvas.height = GAME_HEIGHT;
 
   /* --- UI要素 --- */
+  const gameContainer = document.getElementById('game-container');
   const hudTime = document.getElementById('hudTime');
   const hudElapsed = document.getElementById('hudElapsed');
   const hudScore = document.getElementById('hudScore');
@@ -585,6 +605,7 @@
   const resultStats = document.getElementById('resultStats');
   const btnStart = document.getElementById('btnStart');
   const btnRestart = document.getElementById('btnRestart');
+  const btnMenu = document.getElementById('btnMenu');
   const btnLeft = document.getElementById('btnLeft');
   const btnRight = document.getElementById('btnRight');
   const btnBomb = document.getElementById('btnBomb');
@@ -595,10 +616,37 @@
   let chosenDensity = 'normal'; // 'normal' | 'hard' | 'expert' | 'mega'
   let gameState = 'START'; // 'START' | 'PLAYING' | 'GAMEOVER' | 'CLEAR'
 
+  // メニュー画面・終了画面のキーボードナビゲーション用
+  let menuFocusRow = 0; // 0: プレイ時間, 1: 難易度, 2: GAME START
+  let menuFocusTimeIdx = 0;
+  let menuFocusDensityIdx = 0;
+  let endFocusIdx = 0; // 0: RETRY, 1: MENU
+
+  function updateMenuFocus() {
+    timeBtns.forEach((b, i) => b.classList.toggle('focused', menuFocusRow === 0 && i === menuFocusTimeIdx));
+    densityBtns.forEach((b, i) => b.classList.toggle('focused', menuFocusRow === 1 && i === menuFocusDensityIdx));
+    if (btnStart) btnStart.classList.toggle('focused', menuFocusRow === 2);
+  }
+
+  function updateEndFocus() {
+    if (btnRestart) btnRestart.classList.toggle('focused', endFocusIdx === 0);
+    if (btnMenu) btnMenu.classList.toggle('focused', endFocusIdx === 1);
+  }
+
+  function initMenuFocus() {
+    timeBtns.forEach((btn, idx) => {
+      if (btn.classList.contains('selected')) menuFocusTimeIdx = idx;
+    });
+    densityBtns.forEach((btn, idx) => {
+      if (btn.classList.contains('selected')) menuFocusDensityIdx = idx;
+    });
+    updateMenuFocus();
+  }
+
   // 出現密度パラメータ定義
   const DENSITY_CONFIGS = {
-    normal: { // 並: 控えめで処理が軽く初心者向け
-      name: '並',
+    normal: { // EASY: 控えめで処理が軽く初心者向け
+      name: 'EASY',
       perRow: 10,
       baseRows: 1,
       maxRows: 3,
@@ -607,8 +655,8 @@
       minInterval: 65,
       intervalDecay: 0.5
     },
-    hard: { // 大: ほどよい手応え
-      name: '大',
+    hard: { // NORMAL: ほどよい手応え
+      name: 'NORMAL',
       perRow: 14,
       baseRows: 2,
       maxRows: 4,
@@ -617,8 +665,8 @@
       minInterval: 45,
       intervalDecay: 0.65
     },
-    expert: { // 特大: かなり歯ごたえのある大群
-      name: '特大',
+    expert: { // HARD: かなり歯ごたえのある大群
+      name: 'HARD',
       perRow: 18,
       baseRows: 2,
       maxRows: 5,
@@ -627,8 +675,8 @@
       minInterval: 35,
       intervalDecay: 0.75
     },
-    mega: { // メガ: 画面上部が敵の球体でびっしり埋め尽くされるレベル
-      name: 'メガ',
+    mega: { // DEVIL: 画面上部が敵の球体でびっしり埋め尽くされるレベル
+      name: 'DEVIL',
       perRow: 22,
       baseRows: 2,
       maxRows: 6,
@@ -641,7 +689,7 @@
   let gameTimeLeft = 120;
   let gameElapsed = 0;
   let score = 0;
-  let bombs = 3;
+  let bombs = ['black', 'black', 'black']; // ボムキュー（最大3個・先頭から使用・満タン時最古破棄）
   let screenShake = 0;
 
   /* --- 入力管理 --- */
@@ -649,11 +697,80 @@
   let targetPlayerX = null; // マウス/タップ追従用
 
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
-    if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
-    if (e.code === 'Space') {
-      triggerBomb();
-      e.preventDefault();
+    // 1. スタートメニュー操作: カーソルキーで移動、Spaceで選択、Enterで即スタート
+    if (gameState === 'START') {
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+        menuFocusRow = Math.min(2, menuFocusRow + 1);
+        updateMenuFocus();
+        e.preventDefault();
+      } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+        menuFocusRow = Math.max(0, menuFocusRow - 1);
+        updateMenuFocus();
+        e.preventDefault();
+      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        if (menuFocusRow === 0) {
+          menuFocusTimeIdx = (menuFocusTimeIdx + 1) % timeBtns.length;
+        } else if (menuFocusRow === 1) {
+          menuFocusDensityIdx = (menuFocusDensityIdx + 1) % densityBtns.length;
+        }
+        updateMenuFocus();
+        e.preventDefault();
+      } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        if (menuFocusRow === 0) {
+          menuFocusTimeIdx = (menuFocusTimeIdx - 1 + timeBtns.length) % timeBtns.length;
+        } else if (menuFocusRow === 1) {
+          menuFocusDensityIdx = (menuFocusDensityIdx - 1 + densityBtns.length) % densityBtns.length;
+        }
+        updateMenuFocus();
+        e.preventDefault();
+      } else if (e.code === 'Space') {
+        sfx.init();
+        if (menuFocusRow === 0) {
+          timeBtns[menuFocusTimeIdx].click();
+        } else if (menuFocusRow === 1) {
+          densityBtns[menuFocusDensityIdx].click();
+        } else if (menuFocusRow === 2) {
+          btnStart.click();
+        }
+        e.preventDefault();
+      } else if (e.code === 'Enter') {
+        sfx.init();
+        btnStart.click();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    // 2. ゲーム終了画面（クリア/オーバー）操作: 左右キーで移動、Space/Enterで実行
+    if (gameState === 'GAMEOVER' || gameState === 'CLEAR') {
+      if (e.code === 'ArrowLeft' || e.code === 'ArrowUp' || e.code === 'KeyA' || e.code === 'KeyW') {
+        endFocusIdx = 0; // RETRY
+        updateEndFocus();
+        e.preventDefault();
+      } else if (e.code === 'ArrowRight' || e.code === 'ArrowDown' || e.code === 'KeyD' || e.code === 'KeyS') {
+        endFocusIdx = 1; // MENU
+        updateEndFocus();
+        e.preventDefault();
+      } else if (e.code === 'Space' || e.code === 'Enter') {
+        sfx.init();
+        if (endFocusIdx === 0) {
+          btnRestart.click();
+        } else if (btnMenu) {
+          btnMenu.click();
+        }
+        e.preventDefault();
+      }
+      return;
+    }
+
+    // 3. ゲームプレイ中の操作
+    if (gameState === 'PLAYING') {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+      if (e.code === 'Space') {
+        triggerBomb();
+        e.preventDefault();
+      }
     }
   });
 
@@ -710,21 +827,189 @@
   bindTouchButton(btnRight, () => { keys.right = true; targetPlayerX = null; }, () => { keys.right = false; });
   bindTouchButton(btnBomb, () => { triggerBomb(); }, null);
 
+  /* --- ゲームパッド (Gamepad API) 入力管理 --- */
+  let gpMoveDir = 0;
+  const gpState = {
+    bombPrev: false,
+    startPrev: false,
+    upPrev: false,
+    downPrev: false,
+    leftPrev: false,
+    rightPrev: false,
+    connectedId: null
+  };
+
+  window.addEventListener('gamepadconnected', (e) => {
+    gpState.connectedId = e.gamepad.id;
+    const shortId = e.gamepad.id.length > 24 ? e.gamepad.id.substring(0, 22) + '...' : e.gamepad.id;
+    createPopupText(GAME_WIDTH / 2, GAME_HEIGHT * 0.45, `🎮 コントローラー接続: ${shortId}`, '#00f7ff');
+    sfx.init();
+  });
+
+  window.addEventListener('gamepaddisconnected', (e) => {
+    gpState.connectedId = null;
+    createPopupText(GAME_WIDTH / 2, GAME_HEIGHT * 0.45, '🎮 コントローラー切断', '#ff7b72');
+  });
+
+  function pollGamepad() {
+    if (!navigator.getGamepads) return null;
+    const gamepads = navigator.getGamepads();
+    for (let i = 0; i < gamepads.length; i++) {
+      if (gamepads[i] && gamepads[i].connected) {
+        return gamepads[i];
+      }
+    }
+    return null;
+  }
+
+  function isGpButtonPressed(gp, btnIdx) {
+    if (!gp || !gp.buttons || !gp.buttons[btnIdx]) return false;
+    const b = gp.buttons[btnIdx];
+    return (typeof b === 'object') ? b.pressed : (b === 1.0);
+  }
+
+  function updateGamepad() {
+    const gp = pollGamepad();
+    if (!gp) {
+      gpMoveDir = 0;
+      gpState.bombPrev = false;
+      gpState.startPrev = false;
+      gpState.upPrev = false;
+      gpState.downPrev = false;
+      gpState.leftPrev = false;
+      gpState.rightPrev = false;
+      return;
+    }
+
+    // 1. 移動入力判定: 十字キー(D-Pad) & 左アナログスティック(Axes 0: デッドゾーン0.2)
+    const deadzone = 0.2;
+    const axisX = (gp.axes && gp.axes[0] !== undefined) ? gp.axes[0] : 0;
+    const axisY = (gp.axes && gp.axes[1] !== undefined) ? gp.axes[1] : 0;
+
+    const dpadLeft = isGpButtonPressed(gp, 14);
+    const dpadRight = isGpButtonPressed(gp, 15);
+    const dpadUp = isGpButtonPressed(gp, 12);
+    const dpadDown = isGpButtonPressed(gp, 13);
+
+    const stickLeft = axisX < -deadzone;
+    const stickRight = axisX > deadzone;
+    const stickUp = axisY < -0.4;
+    const stickDown = axisY > 0.4;
+
+    const isLeft = dpadLeft || stickLeft;
+    const isRight = dpadRight || stickRight;
+    const isUp = dpadUp || stickUp;
+    const isDown = dpadDown || stickDown;
+
+    // 2. ボム: ボタン0 (A / ×) または ボタン2 (X / □)
+    const isBombBtn = isGpButtonPressed(gp, 0) || isGpButtonPressed(gp, 2);
+
+    // 3. 決定/即スタート: ボタン0 (A / ×) または スタートボタン (ボタン9)
+    const isConfirmBtn = isGpButtonPressed(gp, 0) || isGpButtonPressed(gp, 9);
+
+    if (isBombBtn || isConfirmBtn || isLeft || isRight || isUp || isDown) {
+      sfx.init();
+    }
+
+    // 左右移動方向の更新
+    if (isLeft && !isRight) gpMoveDir = -1;
+    else if (isRight && !isLeft) gpMoveDir = 1;
+    else gpMoveDir = 0;
+
+    // ゲームプレイ中の操作
+    if (gameState === 'PLAYING') {
+      // コントローラー操作時は連射暴発を防ぐため、1回押して離すまで1回のみ発動判定
+      if (isBombBtn && !gpState.bombPrev) {
+        triggerBomb();
+      }
+    }
+
+    // スタートメニュー画面での操作
+    if (gameState === 'START') {
+      if (isUp && !gpState.upPrev) {
+        menuFocusRow = Math.max(0, menuFocusRow - 1);
+        updateMenuFocus();
+      }
+      if (isDown && !gpState.downPrev) {
+        menuFocusRow = Math.min(2, menuFocusRow + 1);
+        updateMenuFocus();
+      }
+      if (isLeft && !gpState.leftPrev) {
+        if (menuFocusRow === 0) {
+          menuFocusTimeIdx = (menuFocusTimeIdx - 1 + timeBtns.length) % timeBtns.length;
+          timeBtns[menuFocusTimeIdx].click();
+        } else if (menuFocusRow === 1) {
+          menuFocusDensityIdx = (menuFocusDensityIdx - 1 + densityBtns.length) % densityBtns.length;
+          densityBtns[menuFocusDensityIdx].click();
+        }
+        updateMenuFocus();
+      }
+      if (isRight && !gpState.rightPrev) {
+        if (menuFocusRow === 0) {
+          menuFocusTimeIdx = (menuFocusTimeIdx + 1) % timeBtns.length;
+          timeBtns[menuFocusTimeIdx].click();
+        } else if (menuFocusRow === 1) {
+          menuFocusDensityIdx = (menuFocusDensityIdx + 1) % densityBtns.length;
+          densityBtns[menuFocusDensityIdx].click();
+        }
+        updateMenuFocus();
+      }
+
+      // 決定/即スタート (ボタン0 または スタートボタン)
+      if (isConfirmBtn && !gpState.startPrev) {
+        if (btnStart) btnStart.click();
+      }
+    }
+
+    // ゲーム終了画面（クリア / オーバー）での操作
+    if (gameState === 'GAMEOVER' || gameState === 'CLEAR') {
+      if ((isLeft && !gpState.leftPrev) || (isUp && !gpState.upPrev)) {
+        endFocusIdx = 0; // RETRY
+        updateEndFocus();
+      }
+      if ((isRight && !gpState.rightPrev) || (isDown && !gpState.downPrev)) {
+        endFocusIdx = 1; // MENU
+        updateEndFocus();
+      }
+      if (isConfirmBtn && !gpState.startPrev) {
+        if (endFocusIdx === 0) {
+          if (btnRestart) btnRestart.click();
+        } else {
+          if (btnMenu) btnMenu.click();
+        }
+      }
+    }
+
+    // エッジトリガー更新 (押下遷移を保持)
+    gpState.bombPrev = isBombBtn;
+    gpState.startPrev = isConfirmBtn;
+    gpState.upPrev = isUp;
+    gpState.downPrev = isDown;
+    gpState.leftPrev = isLeft;
+    gpState.rightPrev = isRight;
+  }
+
   // 時間選択UI
-  timeBtns.forEach(btn => {
+  timeBtns.forEach((btn, idx) => {
     btn.addEventListener('click', () => {
       timeBtns.forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
       chosenDuration = parseInt(btn.dataset.seconds, 10);
+      menuFocusRow = 0;
+      menuFocusTimeIdx = idx;
+      updateMenuFocus();
     });
   });
 
-  // 敵出現量選択UI
-  densityBtns.forEach(btn => {
+  // 難易度選択UI
+  densityBtns.forEach((btn, idx) => {
     btn.addEventListener('click', () => {
       densityBtns.forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
       chosenDensity = btn.dataset.density || 'normal';
+      menuFocusRow = 1;
+      menuFocusDensityIdx = idx;
+      updateMenuFocus();
     });
   });
 
@@ -792,8 +1077,10 @@
   let hitEffects = [];  // パーティクル
   let popupTexts = [];  // 残りスタミナ等の数値ポップアップ
 
-  // ボム用ホワイトフラッシュ（爆破パーティクル負荷ゼロ化）
+  // ボム用フラッシュ（黒ボム: 弱め白 / 赤ボム: 強烈赤フラッシュ）
   let bombFlashAlpha = 0;
+  let bombFlashColor = '#ffffff';
+  let bombFlashDecay = 0.08;
 
   // 7段階目: 青いレーザー光線管理
   let activeLaser = null; // { x, startY, length, width, life, maxLife }
@@ -858,7 +1145,7 @@
     gameTimeLeft = chosenDuration;
     gameElapsed = 0;
     score = 0;
-    bombs = 3;
+    bombs = ['black', 'black', 'black']; // 初期所持: 黒ボム3個
     screenShake = 0;
     player.x = GAME_WIDTH / 2;
     player.shotLevel = 1;
@@ -879,50 +1166,79 @@
     bossNextTime = gameTimeLeft - 30;
     optionShootCooldown = 24;
     bombFlashAlpha = 0;
+    bombFlashColor = '#ffffff';
+    bombFlashDecay = 0.08;
     activeLaser = null;
     laserCooldown = 0;
     updateHUD();
   }
 
-  function triggerBomb() {
-    if (gameState !== 'PLAYING') return;
-    if (bombs <= 0) return;
-    bombs--;
+  // ボム効果適用ヘルパー（プレイヤー発動・ボス爆破時誘爆共通）
+  function triggerBombEffect(bombType, sourceText = '') {
+    const isRed = (bombType === 'red');
     sfx.bomb();
-    screenShake = 20;
-    updateHUD();
 
-    // 仕様: 画面全体を一瞬真っ白にした後、ザコ爆破演出なしで即消滅（メガ時の負荷を劇的解消）
-    bombFlashAlpha = 1.0;
+    if (isRed) {
+      screenShake = 28;
+      bombFlashColor = '#ff2222';
+      bombFlashAlpha = 0.85; // 強烈な赤フラッシュ
+      bombFlashDecay = 0.035;
+    } else {
+      screenShake = 14;
+      bombFlashColor = '#ffffff';
+      bombFlashAlpha = 0.40; // 弱めの白フラッシュ
+      bombFlashDecay = 0.06;
+    }
+
+    const damage = isRed ? 3 : 1;
 
     enemies.forEach(e => {
       if (e.type === 'normal') {
-        // 爆破演出オブジェクトは生成せず、即時消滅＆スコア加算のみ
-        score += e.maxHp * 10;
-        e.hp = 0;
-      } else if (e.type === 'midboss') {
-        // 中ボスはHP 50%減少
-        const dmg = Math.ceil(e.maxHp * 0.5);
-        e.hp -= dmg;
-        createPopupText(e.x, e.y - 30, `-${dmg} (50%)`, '#ffcc00');
+        e.hp -= damage;
         if (e.hp <= 0) {
-          createExplosion(e.x, e.y, e.radius * 1.5, '#ff8800');
-          score += e.maxHp * 20;
+          score += e.maxHp * 15;
+        } else {
+          // 被弾変色: 黒 -> 灰 -> 白
+          const chp = Math.ceil(e.hp);
+          if (chp >= 3) e.colorType = 'black';
+          else if (chp === 2) e.colorType = 'gray';
+          else e.colorType = 'white';
+        }
+      } else if (e.type === 'midboss') {
+        // 中ボスへのダメージ: 黒ボムは12ダメ、赤ボムは35ダメ
+        const dmg = isRed ? 35 : 12;
+        e.hp -= dmg;
+        createPopupText(e.x, e.y - 30, `-${dmg} (${isRed ? 'RED BOMB' : 'BLACK BOMB'})`, isRed ? '#ff4444' : '#ffcc00');
+        if (e.hp <= 0) {
+          score += 500;
+          createExplosion(e.x, e.y, e.radius * 1.5, '#ffaa00');
         }
       } else if (e.type === 'boss') {
-        // 大ボスも割合ダメージ(35%)
-        const dmg = Math.ceil(e.maxHp * 0.35);
+        // 大ボスへのダメージ: 黒ボムは40ダメ、赤ボムは120ダメ
+        const dmg = isRed ? 120 : 40;
         e.hp -= dmg;
-        createPopupText(e.x, e.y - 45, `-${dmg} (BOMB!)`, '#ff3333');
+        createPopupText(e.x, e.y - 45, `-${dmg} (${isRed ? 'RED BOMB' : 'BLACK BOMB'})`, isRed ? '#ff4444' : '#ff3333');
         if (e.hp <= 0) {
+          score += 2000;
           createExplosion(e.x, e.y, e.radius * 2, '#ff3300');
-          score += e.maxHp * 30;
         }
       }
     });
 
     // 敵死亡判定を即適用
     enemies = enemies.filter(e => e.hp > 0);
+
+    if (sourceText) {
+      createPopupText(GAME_WIDTH / 2, GAME_HEIGHT * 0.42, sourceText, isRed ? '#ff4444' : '#ffffff');
+    }
+  }
+
+  function triggerBomb() {
+    if (gameState !== 'PLAYING') return;
+    if (!bombs || bombs.length === 0) return;
+    const bombType = bombs.shift(); // 先頭のボム（最古）を取り出して使用
+    updateHUD();
+    triggerBombEffect(bombType, bombType === 'red' ? '💣 赤ボム発動！ (全体3ダメ/ザコ全滅)' : '💣 黒ボム発動！ (全体1ダメ)');
   }
 
   function formatTime(sec) {
@@ -935,9 +1251,34 @@
     hudTime.innerText = formatTime(gameTimeLeft);
     hudElapsed.innerText = formatTime(gameElapsed);
     hudScore.innerText = score.toLocaleString();
-    let bIcons = '';
-    for (let i = 0; i < bombs; i++) bIcons += '💣';
-    hudBombs.innerText = bIcons || 'EMPTY';
+    if (!bombs || bombs.length === 0) {
+      hudBombs.innerHTML = '<span style="color:#6e7681;font-size:12px;">EMPTY</span>';
+    } else {
+      let bHtml = '';
+      bombs.forEach((b, idx) => {
+        if (b === 'red') {
+          bHtml += `<span style="color:#ff3333;text-shadow:0 0 8px #ff0000;margin-right:3px;" title="${idx+1}番目: 赤ボム (全体3ダメ)">💣</span>`;
+        } else {
+          bHtml += `<span style="color:#e6edf3;text-shadow:0 0 6px #ffffff;margin-right:3px;" title="${idx+1}番目: 黒ボム (全体1ダメ)">💣</span>`;
+        }
+      });
+      hudBombs.innerHTML = bHtml;
+    }
+
+    if (btnBomb) {
+      if (!bombs || bombs.length === 0) {
+        btnBomb.style.borderColor = 'rgba(255, 75, 75, 0.3)';
+        btnBomb.style.filter = 'grayscale(1)';
+      } else if (bombs[0] === 'red') {
+        btnBomb.style.borderColor = '#ff3333';
+        btnBomb.style.boxShadow = '0 0 16px rgba(255, 0, 0, 0.8), inset 0 0 10px rgba(255, 60, 60, 0.5)';
+        btnBomb.style.filter = 'none';
+      } else {
+        btnBomb.style.borderColor = 'rgba(200, 200, 200, 0.6)';
+        btnBomb.style.boxShadow = '0 0 10px rgba(255, 255, 255, 0.4), inset 0 0 8px rgba(255, 255, 255, 0.2)';
+        btnBomb.style.filter = 'none';
+      }
+    }
   }
 
   /* --- パワーアップ・アイテムボックス（仕様4） --- */
@@ -952,9 +1293,18 @@
     const hpProgress = Math.min(gameElapsed / maxElapsed, 1.0);
     const boxHp = Math.round(3 + hpProgress * 7); // 3 → 10
 
-    // アイテム種類: spread / option / bomb（ボム補充）の3系統
+    // アイテム種類: spread / option / bomb_black / bomb_red の4系統（ランダム出現）
     const rnd = Math.random();
-    const boxType = rnd < 0.33 ? 'spread' : rnd < 0.66 ? 'option' : 'bomb';
+    let boxType;
+    if (rnd < 0.32) {
+      boxType = 'spread';
+    } else if (rnd < 0.64) {
+      boxType = 'option';
+    } else if (rnd < 0.82) {
+      boxType = 'bomb_black';
+    } else {
+      boxType = 'bomb_red';
+    }
 
     supplyBoxes.push({
       x: fromLeft ? ROAD.leftWall - 30 : ROAD.rightWall + 30,
@@ -984,9 +1334,20 @@
     const spacing = roadWidth / perRow;
 
     for (let i = 0; i < waveSize; i++) {
-      // HP: 1〜3のランダム（耐久によって色分け）
-      const hp = Math.floor(Math.random() * 3) + 1;
-      const colorType = hp === 1 ? 'white' : hp === 2 ? 'gray' : 'black';
+      // HP: 白5, 灰4, 黒1の割合 (白50%, 灰40%, 黒10%)
+      const rVal = Math.random() * 10;
+      let hp = 1;
+      let colorType = 'white';
+      if (rVal < 5) {
+        hp = 1;
+        colorType = 'white';
+      } else if (rVal < 9) {
+        hp = 2;
+        colorType = 'gray';
+      } else {
+        hp = 3;
+        colorType = 'black';
+      }
 
       const row = Math.floor(i / perRow);
       const col = i % perRow;
@@ -1130,13 +1491,13 @@
       addBullet(0, 0, -baseSpeed);
     } else if (lvl === 3) {
       // 3段階目: 弾を2列に
-      addBullet(-7, 0, -baseSpeed);
-      addBullet(7, 0, -baseSpeed);
+      addBullet(-8, 0, -baseSpeed);
+      addBullet(8, 0, -baseSpeed);
     } else if (lvl === 4) {
-      // 4段階目: 弾を3列に
-      addBullet(-11, 0, -baseSpeed);
+      // 4段階目: 弾を3列に（ザコ1体に複数列が誤ヒットしない間隔を確保）
+      addBullet(-15, 0, -baseSpeed);
       addBullet(0, 0, -baseSpeed);
-      addBullet(11, 0, -baseSpeed);
+      addBullet(15, 0, -baseSpeed);
     } else if (lvl === 5) {
       // 5段階目: 更に2列追加して、左右10度方向に弾を発射（中央3列 + 左右10度2列 = 計5列）
       const rad10 = 10 * Math.PI / 180; // 10度
@@ -1144,12 +1505,12 @@
       const cos10 = Math.cos(rad10) * baseSpeed;
 
       // 中央3列直進
-      addBullet(-11, 0, -baseSpeed);
+      addBullet(-15, 0, -baseSpeed);
       addBullet(0, 0, -baseSpeed);
-      addBullet(11, 0, -baseSpeed);
+      addBullet(15, 0, -baseSpeed);
       // 左右10度方向
-      addBullet(-13, -sin10, -cos10);
-      addBullet(13, sin10, -cos10);
+      addBullet(-17, -sin10, -cos10);
+      addBullet(17, sin10, -cos10);
     } else if (lvl === 6) {
       // 6段階目: 7列発射（中央3列直進 + 左右10度2列 + 左右15度2列）
       const rad10 = 10 * Math.PI / 180;
@@ -1161,15 +1522,15 @@
       const cos15 = Math.cos(rad15) * baseSpeed;
 
       // 中央3列直進
-      addBullet(-11, 0, -baseSpeed);
+      addBullet(-15, 0, -baseSpeed);
       addBullet(0, 0, -baseSpeed);
-      addBullet(11, 0, -baseSpeed);
+      addBullet(15, 0, -baseSpeed);
       // 左右10度方向
-      addBullet(-13, -sin10, -cos10);
-      addBullet(13, sin10, -cos10);
+      addBullet(-17, -sin10, -cos10);
+      addBullet(17, sin10, -cos10);
       // 左右15度方向
-      addBullet(-16, -sin15, -cos15);
-      addBullet(16, sin15, -cos15);
+      addBullet(-20, -sin15, -cos15);
+      addBullet(20, sin15, -cos15);
     } else if (lvl >= 7) {
       // 7段階目: 真ん中の弾1本は青い貫通レーザー光線に変更！両脇の6列を同時斉射
       const rad10 = 10 * Math.PI / 180;
@@ -1181,14 +1542,14 @@
       const cos15 = Math.cos(rad15) * baseSpeed;
 
       // 直進2列（中央0はレーザー光線に置換）
-      addBullet(-11, 0, -baseSpeed);
-      addBullet(11, 0, -baseSpeed);
+      addBullet(-15, 0, -baseSpeed);
+      addBullet(15, 0, -baseSpeed);
       // 左右10度方向
-      addBullet(-13, -sin10, -cos10);
-      addBullet(13, sin10, -cos10);
+      addBullet(-17, -sin10, -cos10);
+      addBullet(17, sin10, -cos10);
       // 左右15度方向
-      addBullet(-16, -sin15, -cos15);
-      addBullet(16, sin15, -cos15);
+      addBullet(-20, -sin15, -cos15);
+      addBullet(20, sin15, -cos15);
     }
   }
 
@@ -1221,10 +1582,10 @@
     // 道路スクロール
     ROAD.scrollOffset = (ROAD.scrollOffset + ROAD.speed) % 80;
 
-    // プレイヤー移動 (キーボードまたはタッチ/クリック)
+    // プレイヤー移動 (キーボード / ゲームパッド / タッチ / クリック)
     let moveDir = 0;
-    if (keys.left) moveDir -= 1;
-    if (keys.right) moveDir += 1;
+    if (keys.left || gpMoveDir < 0) moveDir -= 1;
+    if (keys.right || gpMoveDir > 0) moveDir += 1;
 
     if (moveDir !== 0) {
       player.x += moveDir * player.speed;
@@ -1297,6 +1658,11 @@
           if (e.type === 'midboss' || e.type === 'boss') {
             e.staminaTimer = 30;
             createPopupText(e.x, e.y - e.radius - 12, `HP: ${Math.max(0, Math.ceil(e.hp))}`, '#00f7ff');
+          } else if (e.type === 'normal') {
+            const chp = Math.ceil(e.hp);
+            if (chp >= 3) e.colorType = 'black';
+            else if (chp === 2) e.colorType = 'gray';
+            else e.colorType = 'white';
           }
 
           // 20体目に到達したら、レーザーの先端をその敵の地点で遮断
@@ -1340,7 +1706,7 @@
             });
           } else if (optLevel === 3) {
             // 3段階目: 弾を2列に
-            [-4, 4].forEach(ox => {
+            [-7, 7].forEach(ox => {
               bullets.push({
                 x: op.x + ox,
                 y: op.y,
@@ -1354,8 +1720,8 @@
               });
             });
           } else {
-            // 4段階目（最大）: 弾を3列に
-            [-6, 0, 6].forEach(ox => {
+            // 4段階目（最大）: 弾を3列に（ザコ1体に複数列が誤ヒットしない間隔を確保）
+            [-13, 0, 13].forEach(ox => {
               bullets.push({
                 x: op.x + ox,
                 y: op.y,
@@ -1451,7 +1817,7 @@
           } else {
             score += 400;
             if (!isHighDensity && player.shotLevel === 5) {
-              createPopupText(player.x, player.y - 45, 'SHOT MAX Lv.5 [特大/メガでLv.7解放]!', '#ffea00');
+              createPopupText(player.x, player.y - 45, 'SHOT MAX Lv.5 [HARD/DEVILでLv.7解放]!', '#ffea00');
             } else {
               createPopupText(player.x, player.y - 45, 'SHOT LEVEL MAX! +400pts', '#00ffff');
             }
@@ -1465,12 +1831,23 @@
             score += 300;
             createPopupText(player.x, player.y - 45, 'OPTION MAX! +300pts', '#00ffff');
           }
-        } else if (box.type === 'bomb') {
-          // ボム補充アイテム
-          const gained = Math.min(2, 5 - bombs); // 最大5個まで
-          bombs += gained;
+        } else if (box.type === 'bomb_black' || box.type === 'bomb_red') {
+          // ボム補充アイテム (黒ボム / 赤ボム: 満タン時は最古破棄)
+          const isRed = (box.type === 'bomb_red');
+          const newBomb = isRed ? 'red' : 'black';
+          let discarded = false;
+          if (bombs.length >= 3) {
+            // 満タン時: 最初に取った方（先頭）を捨てて、末尾に追加
+            bombs.shift();
+            discarded = true;
+          }
+          bombs.push(newBomb);
           updateHUD();
-          createPopupText(player.x, player.y - 45, `BOMB +${gained}!`, '#ff9900');
+          if (isRed) {
+            createPopupText(player.x, player.y - 45, discarded ? '赤ボム獲得! (先頭破棄)' : '赤ボム獲得! [全体3ダメ]', '#ff4444');
+          } else {
+            createPopupText(player.x, player.y - 45, discarded ? '黒ボム獲得! (先頭破棄)' : '黒ボム獲得! [全体1ダメ]', '#ffffff');
+          }
         }
 
         supplyBoxes.splice(i, 1);
@@ -1523,33 +1900,48 @@
           const dy = b.y - e.y;
           const distSq = dx * dx + dy * dy;
 
-          if (distSq < (e.radius + 6) * (e.radius + 6)) {
+          const hitR = (e.type === 'normal') ? (e.radius + 2.0) : (e.radius + 6.0);
+          if (distSq < hitR * hitR) {
             bullets.splice(j, 1);
             e.hp -= b.damage;
             sfx.hit();
 
-          // スパーク
-          hitEffects.push({
-            x: b.x,
-            y: b.y,
-            vx: (Math.random() - 0.5) * 4,
-            vy: (Math.random() - 0.5) * 4,
-            life: 0.5,
-            decay: 0.1,
-            color: '#ffff55',
-            size: 2.5
-          });
+            // ザコキャラの被弾変色 (黒 -> 灰 -> 白)
+            if (e.type === 'normal') {
+              const chp = Math.ceil(e.hp);
+              if (chp >= 3) e.colorType = 'black';
+              else if (chp === 2) e.colorType = 'gray';
+              else e.colorType = 'white';
+            }
 
-          // 仕様: 中ボス・大ボスは弾ヒット時、頭上に「残りスタミナ（数値）」をポップアップ表示
-          if (e.type === 'midboss' || e.type === 'boss') {
-            e.staminaTimer = 30; // 表示強調
-            createPopupText(e.x + (Math.random() * 20 - 10), e.y - e.radius - 12, `HP: ${Math.max(0, Math.ceil(e.hp))}`, '#ff5555');
+            // スパーク
+            hitEffects.push({
+              x: b.x,
+              y: b.y,
+              vx: (Math.random() - 0.5) * 4,
+              vy: (Math.random() - 0.5) * 4,
+              life: 0.5,
+              decay: 0.1,
+              color: '#ffff55',
+              size: 2.5
+            });
+
+            // 仕様: 中ボス・大ボスは弾ヒット時、頭上に「残りスタミナ（数値）」をポップアップ表示
+            if (e.type === 'midboss' || e.type === 'boss') {
+              e.staminaTimer = 30; // 表示強調
+              createPopupText(e.x + (Math.random() * 20 - 10), e.y - e.radius - 12, `HP: ${Math.max(0, Math.ceil(e.hp))}`, '#ff5555');
+            }
+
+            // 仕様: ザコ1機に対して1フレームで消費される弾は1発のみ。
+            // 3列などの横並び弾は1列のみ消費され、残りの列は奥へ直進して奥の敵へ到達する
+            if (e.type === 'normal') {
+              break;
+            }
+
+            if (e.hp <= 0) break;
           }
-
-          if (e.hp <= 0) break;
         }
       }
-    }
 
       // 敵撃破
       if (e.hp <= 0) {
@@ -1558,17 +1950,18 @@
           createExplosion(e.x, e.y, e.radius, e.colorType === 'white' ? '#ffffff' : (e.colorType === 'gray' ? '#aaaaaa' : '#555555'));
         } else if (e.type === 'midboss') {
           score += 500;
-          screenShake = 12;
+          screenShake = 14;
           createExplosion(e.x, e.y, 45, '#ffaa00');
-          createPopupText(e.x, e.y, '+500 DEFEATED!', '#ffd700');
+          createPopupText(e.x, e.y, '+500 中ボス撃破！', '#ffd700');
+          // 中ボス爆破時: 黒ボム(画面全体に弾1発分)と同じ効果を誘爆発動！
+          triggerBombEffect('black', '⚡ 中ボス爆破：黒ボム誘爆(全体1ダメ)！');
         } else if (e.type === 'boss') {
           score += 2000;
-          screenShake = 22;
+          screenShake = 26;
           createExplosion(e.x, e.y, 70, '#ff3300');
-          createPopupText(e.x, e.y, '+2000 BOSS DOWN!', '#ff3333');
-          // ボス撃破でボム1つ補充ボーナス
-          if (bombs < 3) bombs++;
-          updateHUD();
+          createPopupText(e.x, e.y, '+2000 大ボス撃破！', '#ff3333');
+          // 大ボス爆破時: 赤ボム(画面全体に弾3発分)と同じ効果を誘爆発動！
+          triggerBombEffect('red', '💥 大ボス爆破：赤ボム全域誘爆(ザコ全滅)！');
         }
         enemies.splice(i, 1);
         continue;
@@ -1648,11 +2041,14 @@
     // 8. ポップアップテキスト
     drawPopups();
 
-    // 9. ボム発動時ホワイトフラッシュ（最前面にフラッシュ描画）
+    // 9. ボム発動時フラッシュ（黒ボム: 弱め白 / 赤ボム: 強烈赤フラッシュ）
     if (bombFlashAlpha > 0) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${bombFlashAlpha})`;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1.0, Math.max(0, bombFlashAlpha));
+      ctx.fillStyle = bombFlashColor;
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-      bombFlashAlpha -= 0.08;
+      ctx.restore();
+      bombFlashAlpha -= bombFlashDecay;
     }
 
     ctx.restore();
@@ -1856,21 +2252,34 @@
       } else if (box.type === 'option') {
         ctx.fillStyle = '#005f73';
         ctx.strokeStyle = '#00f7ff';
-      } else { // bomb
-        ctx.fillStyle = '#5c1a1a';
-        ctx.strokeStyle = '#ff4444';
+      } else if (box.type === 'bomb_red') {
+        ctx.fillStyle = '#5c1212';
+        ctx.strokeStyle = '#ff3333';
+      } else { // bomb_black
+        ctx.fillStyle = '#22262e';
+        ctx.strokeStyle = '#8b949e';
       }
       ctx.lineWidth = 2;
       ctx.fillRect(-box.width / 2, -box.height / 2, box.width, box.height);
       ctx.strokeRect(-box.width / 2, -box.height / 2, box.width, box.height);
 
       // エンブレム文字
-      ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const label = box.type === 'spread' ? 'S' : box.type === 'option' ? 'O' : '💣';
-      ctx.fillText(label, 0, 0);
+      if (box.type === 'spread') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('S', 0, 0);
+      } else if (box.type === 'option') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('O', 0, 0);
+      } else if (box.type === 'bomb_red') {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText('💣', 0, 0);
+      } else {
+        ctx.fillStyle = '#e6edf3';
+        ctx.fillText('💣', 0, 0);
+      }
 
       // 耐久ゲージ（hp表示）
       const barW = box.width;
@@ -2264,18 +2673,23 @@
       resultStatus.className = 'result-status gameover-text';
       resultStatus.innerText = 'DEFENSE BREACHED';
     }
-    const dName = (DENSITY_CONFIGS[chosenDensity] || {}).name || '並';
+    const dName = (DENSITY_CONFIGS[chosenDensity] || {}).name || 'EASY';
     resultStats.innerHTML = `
       DIFFICULTY: <strong>${dName}</strong> / TARGET: <strong>${Math.floor(chosenDuration / 60)}分</strong><br>
       SURVIVED TIME: <strong>${formatTime(gameElapsed)}</strong><br>
       FINAL SCORE: <strong>${score.toLocaleString()}</strong>
     `;
+    if (gameContainer) gameContainer.classList.remove('playing');
+    endFocusIdx = 0;
+    updateEndFocus();
   }
 
   btnStart.addEventListener('click', () => {
     sfx.init();
     startModal.classList.add('hidden');
     gameState = 'PLAYING';
+    targetPlayerX = null;
+    if (gameContainer) gameContainer.classList.add('playing');
     resetGame();
   });
 
@@ -2283,16 +2697,21 @@
     sfx.init();
     endModal.classList.add('hidden');
     gameState = 'PLAYING';
+    targetPlayerX = null;
+    if (gameContainer) gameContainer.classList.add('playing');
     resetGame();
   });
 
-  const btnMenu = document.getElementById('btnMenu');
   if (btnMenu) {
     btnMenu.addEventListener('click', () => {
       sfx.init();
       endModal.classList.add('hidden');
       startModal.classList.remove('hidden');
       gameState = 'START';
+      targetPlayerX = null;
+      if (gameContainer) gameContainer.classList.remove('playing');
+      menuFocusRow = 0;
+      updateMenuFocus();
     });
   }
 
@@ -2304,13 +2723,17 @@
     // 極端なラグ時のデルタを制限
     const cappedDelta = Math.min(delta, 0.1);
 
+    // ゲームパッド入力ポーリング（全ゲームステートで常時処理）
+    updateGamepad();
+
     update(cappedDelta);
     render();
 
     requestAnimationFrame(gameLoop);
   }
 
-  // 初回レンダリング
+  // 初回フォーカス設定 & レンダリング
+  initMenuFocus();
   render();
   requestAnimationFrame(gameLoop);
 
