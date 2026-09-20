@@ -373,24 +373,21 @@
 <div id="game-container">
   <canvas id="gameCanvas" width="450" height="800"></canvas>
 
-  <!-- 上部 HUD -->
+  <!-- 上部 HUD (ボム残数を左端、残り時間を中央左、スコアを中央右、右端はサウンドボタン用スペース) -->
   <div class="hud-top">
+    <div class="hud-item">
+      <span class="hud-label">BOMB [SPACE]</span>
+      <span class="hud-value bomb-icons" id="hudBombs">💣💣💣</span>
+    </div>
     <div class="hud-item">
       <span class="hud-label">TIME LEFT</span>
       <span class="hud-value" id="hudTime">02:00</span>
     </div>
     <div class="hud-item">
-      <span class="hud-label">ELAPSED</span>
-      <span class="hud-value" id="hudElapsed">00:00</span>
-    </div>
-    <div class="hud-item">
       <span class="hud-label">SCORE</span>
       <span class="hud-value" id="hudScore">0</span>
     </div>
-    <div class="hud-item">
-      <span class="hud-label">BOMB [SPACE]</span>
-      <span class="hud-value bomb-icons" id="hudBombs">💣💣💣</span>
-    </div>
+    <div class="hud-item" style="min-width: 68px; visibility: hidden;" aria-hidden="true"></div>
   </div>
 
   <!-- サウンドトグル -->
@@ -589,7 +586,6 @@
   /* --- UI要素 --- */
   const gameContainer = document.getElementById('game-container');
   const hudTime = document.getElementById('hudTime');
-  const hudElapsed = document.getElementById('hudElapsed');
   const hudScore = document.getElementById('hudScore');
   const hudBombs = document.getElementById('hudBombs');
   const soundToggle = document.getElementById('soundToggle');
@@ -1243,7 +1239,6 @@
 
   function updateHUD() {
     hudTime.innerText = formatTime(gameTimeLeft);
-    hudElapsed.innerText = formatTime(gameElapsed);
     hudScore.innerText = score.toLocaleString();
     if (!bombs || bombs.length === 0) {
       hudBombs.innerHTML = '<span style="color:#6e7681;font-size:12px;">EMPTY</span>';
@@ -2709,18 +2704,33 @@
     });
   }
 
-  /* --- メインループ (requestAnimationFrame) --- */
+  /* --- メインループ (60 FPS 固定タイムステップ / 120Hz等 高リフレッシュレート対応) --- */
+  const FIXED_STEP = 1000 / 60; // 1フレーム = 16.666ms (秒間60更新)
+  let accumulator = 0;
+
   function gameLoop(now) {
-    const delta = (now - lastTime) / 1000;
+    if (!now) now = performance.now();
+    let frameTime = now - lastTime;
     lastTime = now;
 
-    // 極端なラグ時のデルタを制限
-    const cappedDelta = Math.min(delta, 0.1);
+    // タブ非アクティブや極端なラグ時の急加速防止（最大100ms＝約6フレーム分に制限）
+    if (frameTime > 100) frameTime = 100;
+    if (frameTime < 0) frameTime = 0;
+
+    accumulator += frameTime;
 
     // ゲームパッド入力ポーリング（全ゲームステートで常時処理）
     updateGamepad();
 
-    update(cappedDelta);
+    // 60 FPS（16.666ms）基準で厳密にupdateを実行
+    // 120Hzや144Hzディスプレイでも連射速度・敵侵略速度が2倍にならず、正規の60FPS速度を厳格に保持
+    let updates = 0;
+    while (accumulator >= FIXED_STEP && updates < 5) {
+      update(FIXED_STEP / 1000);
+      accumulator -= FIXED_STEP;
+      updates++;
+    }
+
     render();
 
     requestAnimationFrame(gameLoop);
