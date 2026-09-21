@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ハイウェイ・ディフェンス・シューター</title>
+  <title>RAMPART DEFENCE - 城塞防衛シューティング</title>
   <style>
     * {
       box-sizing: border-box;
@@ -167,8 +167,8 @@
       left: 0;
       width: 100%;
       height: 10px;
-      background: linear-gradient(180deg, rgba(255, 30, 30, 0.8), rgba(255, 0, 0, 0.2));
-      box-shadow: 0 -4px 15px #ff0033;
+      background: linear-gradient(180deg, rgba(255, 170, 0, 0.85), rgba(255, 100, 0, 0.2));
+      box-shadow: 0 -4px 15px #ffaa00;
       z-index: 11;
       pointer-events: none;
       animation: pulseAlert 1.2s infinite alternate;
@@ -176,7 +176,7 @@
 
     @keyframes pulseAlert {
       from { opacity: 0.6; }
-      to { opacity: 1.0; filter: drop-shadow(0 0 8px #ff0000); }
+      to { opacity: 1.0; filter: drop-shadow(0 0 8px #ffaa00); }
     }
 
     /* オーバーレイ（スタート/ゲームオーバー/クリア） */
@@ -418,8 +418,8 @@
 
   <!-- スタート画面モーダル -->
   <div id="startModal" class="modal-overlay">
-    <div class="game-title">HIGHWAY DEFENSE</div>
-    <div class="game-subtitle">ハイウェイ・ディフェンス・シューター</div>
+    <div class="game-title">RAMPART DEFENCE</div>
+    <div class="game-subtitle">城塞防衛シューティング</div>
 
     <span class="selection-label">① プレイ時間（任務時間）</span>
     <div class="option-group" id="timeGroup">
@@ -440,7 +440,7 @@
     <button id="btnStart" class="btn-action">GAME START</button>
 
     <div class="rules-card">
-      ・<span class="danger-text">防衛敗北:</span> 敵が1体でも最下部ラインを越えたら即GAME OVER<br>
+      ・<span class="danger-text">防衛敗北:</span> 敵が1体でも最下部城門防壁ラインを越えたら即GAME OVER<br>
       ・<strong>操作:</strong> [←][→]/スティックで移動、自動射撃（横並び弾は1列ずつ消費・奥へ貫通）<br>
       ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
       &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体3ダメ/ザコ全滅)</span> ※ボス撃破で自動誘爆<br>
@@ -467,53 +467,76 @@
 (() => {
   'use strict';
 
-  /* --- Web Audio API によるサウンド生成 --- */
+  /* --- Web Audio API によるサウンド生成（リミッター＆コンプレッサー搭載） --- */
   class SoundFX {
     constructor() {
       this.ctx = null;
       this.enabled = true;
       this.lastHitTime = 0;
       this.lastMetalHitTime = 0;
+      this.compressor = null;
+      this.masterGain = null;
     }
     init() {
       if (!this.ctx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (AudioCtx) this.ctx = new AudioCtx();
+        if (AudioCtx) {
+          this.ctx = new AudioCtx();
+          // マスター・ダイナミクスコンプレッサー（音割れ・デジタルクリッピング・OS側保護消音の完全防止）
+          this.compressor = this.ctx.createDynamicsCompressor();
+          this.compressor.threshold.setValueAtTime(-10, this.ctx.currentTime);
+          this.compressor.knee.setValueAtTime(8, this.ctx.currentTime);
+          this.compressor.ratio.setValueAtTime(14, this.ctx.currentTime);
+          this.compressor.attack.setValueAtTime(0.002, this.ctx.currentTime);
+          this.compressor.release.setValueAtTime(0.08, this.ctx.currentTime);
+
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.gain.setValueAtTime(0.75, this.ctx.currentTime);
+
+          this.compressor.connect(this.masterGain);
+          this.masterGain.connect(this.ctx.destination);
+        }
       }
       if (this.ctx && this.ctx.state === 'suspended') {
         this.ctx.resume();
       }
     }
+    get out() {
+      if (!this.compressor && this.ctx) this.init();
+      return this.compressor || (this.ctx ? this.ctx.destination : null);
+    }
     shoot() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(480, this.ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(120, this.ctx.currentTime + 0.07);
-      gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.07);
+      osc.frequency.setValueAtTime(480, t);
+      osc.frequency.exponentialRampToValueAtTime(120, t + 0.07);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.07);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.07);
+      gain.connect(this.out);
+      osc.start(t);
+      osc.stop(t + 0.07);
     }
     shootPower() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(650, this.ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(200, this.ctx.currentTime + 0.09);
-      gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.09);
+      osc.frequency.setValueAtTime(650, t);
+      osc.frequency.exponentialRampToValueAtTime(200, t + 0.09);
+      gain.gain.setValueAtTime(0.14, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.09);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.09);
+      gain.connect(this.out);
+      osc.start(t);
+      osc.stop(t + 0.09);
     }
     laser() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
       const t = this.ctx.currentTime;
       // レーザー音: 金属音（キーン... という高域の非整数倍音と金属的レゾナンス）
       const freqs = [1980, 2940, 4120];
@@ -527,13 +550,13 @@
         gain.gain.setValueAtTime(gains[idx], t);
         gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
         osc.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(this.out);
         osc.start(t);
         osc.stop(t + 0.22);
       });
     }
     metalHit() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
       const now = performance.now();
       if (now - this.lastMetalHitTime < 50) return; // 50ms クールダウン
       this.lastMetalHitTime = now;
@@ -546,82 +569,104 @@
       gain.gain.setValueAtTime(0.12, t);
       gain.gain.exponentialRampToValueAtTime(0.005, t + 0.05);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(this.out);
       osc.start(t);
       osc.stop(t + 0.05);
     }
     hit() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'square';
-      osc.frequency.setValueAtTime(280, this.ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(80, this.ctx.currentTime + 0.05);
-      gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+      osc.frequency.setValueAtTime(280, t);
+      osc.frequency.exponentialRampToValueAtTime(80, t + 0.05);
+      gain.gain.setValueAtTime(0.08, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.05);
+      gain.connect(this.out);
+      osc.start(t);
+      osc.stop(t + 0.05);
     }
     explode() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'square';
-      osc.frequency.setValueAtTime(140, this.ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.25);
-      gain.gain.setValueAtTime(0.22, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+      osc.frequency.setValueAtTime(140, t);
+      osc.frequency.exponentialRampToValueAtTime(30, t + 0.25);
+      gain.gain.setValueAtTime(0.20, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.25);
+      gain.connect(this.out);
+      osc.start(t);
+      osc.stop(t + 0.25);
     }
     bomb() {
-      if (!this.enabled || !this.ctx) return;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(180, this.ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 1.2);
-      gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.2);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 1.2);
+      if (!this.enabled || !this.ctx || !this.out) return;
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      const t = this.ctx.currentTime;
+      const dur = 0.85;
+
+      // 1. 重低音インパクト（サイン波によるクリーンな重厚爆破衝撃音、過大振幅・DCバイアスを完全排除）
+      const osc1 = this.ctx.createOscillator();
+      const gain1 = this.ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(160, t);
+      osc1.frequency.exponentialRampToValueAtTime(40, t + dur);
+      gain1.gain.setValueAtTime(0.26, t);
+      gain1.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      osc1.connect(gain1);
+      gain1.connect(this.out);
+      osc1.start(t);
+      osc1.stop(t + dur);
+
+      // 2. 轟音ノイズ・爆風感（三角波によるザラついた破壊音）
+      const osc2 = this.ctx.createOscillator();
+      const gain2 = this.ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(115, t);
+      osc2.frequency.exponentialRampToValueAtTime(32, t + dur * 0.7);
+      gain2.gain.setValueAtTime(0.18, t);
+      gain2.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.7);
+      osc2.connect(gain2);
+      gain2.connect(this.out);
+      osc2.start(t);
+      osc2.stop(t + dur * 0.7);
     }
     powerup() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
       const notes = [330, 440, 550, 660, 880];
       notes.forEach((f, idx) => {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(f, this.ctx.currentTime + idx * 0.06);
-        gain.gain.setValueAtTime(0.15, this.ctx.currentTime + idx * 0.06);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + idx * 0.06 + 0.1);
+        osc.frequency.setValueAtTime(f, t + idx * 0.06);
+        gain.gain.setValueAtTime(0.14, t + idx * 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + idx * 0.06 + 0.1);
         osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(this.ctx.currentTime + idx * 0.06);
-        osc.stop(this.ctx.currentTime + idx * 0.06 + 0.1);
+        gain.connect(this.out);
+        osc.start(t + idx * 0.06);
+        osc.stop(t + idx * 0.06 + 0.1);
       });
     }
     gameover() {
-      if (!this.enabled || !this.ctx) return;
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
       const notes = [300, 250, 200, 140];
       notes.forEach((f, idx) => {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(f, this.ctx.currentTime + idx * 0.15);
-        gain.gain.setValueAtTime(0.2, this.ctx.currentTime + idx * 0.15);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + idx * 0.15 + 0.2);
+        osc.frequency.setValueAtTime(f, t + idx * 0.15);
+        gain.gain.setValueAtTime(0.18, t + idx * 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + idx * 0.15 + 0.2);
         osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(this.ctx.currentTime + idx * 0.15);
-        osc.stop(this.ctx.currentTime + idx * 0.15 + 0.2);
+        gain.connect(this.out);
+        osc.start(t + idx * 0.15);
+        osc.stop(t + idx * 0.15 + 0.2);
       });
     }
   }
@@ -1065,14 +1110,14 @@
     soundToggle.innerText = sfx.enabled ? '🔊 ON' : '🔇 OFF';
   });
 
-  /* --- ゲームワールド要素 --- */
-  // 道路の寸法
+  /* --- ゲームワールド要素（城塞・防壁ステージ） --- */
+  // 城塞フィールドの寸法（固定防衛戦のためスクロール停止）
   const ROAD = {
     leftWall: 45,
     rightWall: GAME_WIDTH - 45,
     lanes: 4,
     scrollOffset: 0,
-    speed: 3.5
+    speed: 0 // 固定防衛戦（路面高速流動を停止）
   };
 
   // 防衛ライン (画面最下部)
@@ -2268,8 +2313,8 @@
       ctx.translate(sx, sy);
     }
 
-    // 1. 高速道路 背景描画
-    drawHighway();
+    // 1. 城塞・石畳 背景描画
+    drawRampartField();
 
     // 2. 補給コンテナ
     drawSupplyBoxes();
@@ -2308,140 +2353,246 @@
     ctx.restore();
   }
 
-  /* --- 高速道路の描画 --- */
-  function drawHighway() {
-    // 道路のアスファルト
-    ctx.fillStyle = '#171c26';
+  /* --- 城塞・石畳フィールドの描画 --- */
+  function drawRampartField() {
+    // 1. 基底の暗色背景
+    ctx.fillStyle = '#0f131a';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // 走行路面（側壁の間）
-    ctx.fillStyle = '#212735';
-    ctx.fillRect(ROAD.leftWall, 0, ROAD.rightWall - ROAD.leftWall, GAME_HEIGHT);
+    // 2. 中央の石畳防衛広場（城壁の間: ROAD.leftWall ~ ROAD.rightWall）
+    const wallL = ROAD.leftWall;
+    const wallR = ROAD.rightWall;
+    const groundW = wallR - wallL;
 
-    // 道路両脇のコンクリート壁 & ガードレール
-    drawWall(0, ROAD.leftWall, true);
-    drawWall(ROAD.rightWall, GAME_WIDTH - ROAD.rightWall, false);
+    ctx.fillStyle = '#171c25';
+    ctx.fillRect(wallL, 0, groundW, GAME_HEIGHT);
 
-    // 車線区分線（破線のアニメーションスクロール）
-    const totalWidth = ROAD.rightWall - ROAD.leftWall;
-    const laneWidth = totalWidth / ROAD.lanes;
+    // 石畳タイルパターン（レンガ状・互い違いの堅牢な敷石）
+    const stoneH = 26;
+    const stoneW = 45; // 8列構成 (360 / 8 = 45)
+    const numRows = Math.ceil(GAME_HEIGHT / stoneH) + 1;
+    const cols = 9;
 
-    ctx.lineWidth = 3;
-    for (let i = 1; i < ROAD.lanes; i++) {
-      const lx = ROAD.leftWall + i * laneWidth;
-      ctx.strokeStyle = (i === ROAD.lanes / 2) ? 'rgba(255, 180, 0, 0.45)' : 'rgba(255, 255, 255, 0.25)';
-      ctx.setLineDash([25, 25]);
-      ctx.lineDashOffset = -ROAD.scrollOffset;
-      ctx.beginPath();
-      ctx.moveTo(lx, 0);
-      ctx.lineTo(lx, GAME_HEIGHT);
-      ctx.stroke();
+    for (let r = 0; r < numRows; r++) {
+      const y = r * stoneH;
+      const isShifted = (r % 2 === 1);
+      const startX = isShifted ? (wallL - stoneW * 0.5) : wallL;
+
+      for (let c = 0; c < cols; c++) {
+        const x = startX + c * stoneW;
+        if (x + stoneW < wallL || x > wallR) continue;
+
+        const drawX = Math.max(wallL, x);
+        const drawW = Math.min(x + stoneW, wallR) - drawX;
+        if (drawW <= 0) continue;
+
+        // 石ごとの自然な濃淡バリエーション
+        const seed = (r * 11 + c * 17) % 5;
+        if (seed === 0) ctx.fillStyle = '#1d232e';
+        else if (seed === 1) ctx.fillStyle = '#191f28';
+        else if (seed === 2) ctx.fillStyle = '#222935';
+        else if (seed === 3) ctx.fillStyle = '#1a202a';
+        else ctx.fillStyle = '#161b23';
+
+        ctx.fillRect(drawX + 1, y + 1, drawW - 2, stoneH - 2);
+
+        // 石の上面ハイライトと目地（モルタル）の立体表現
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+        ctx.fillRect(drawX + 1, y + 1, drawW - 2, 1);
+        ctx.fillRect(drawX + 1, y + 1, 1, stoneH - 2);
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(drawX + 1, y + stoneH - 1, drawW - 2, 1);
+        ctx.fillRect(drawX + drawW - 1, y + 1, 1, stoneH - 2);
+
+        // まれに入る石のクラック（ひび割れ）・チゼル傷
+        if ((seed === 2 && r % 3 === 0) || (seed === 4 && r % 4 === 1)) {
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(drawX + 8, y + 6);
+          ctx.lineTo(drawX + 18, y + 15);
+          ctx.lineTo(drawX + 24, y + 13);
+          ctx.stroke();
+        }
+      }
     }
-    ctx.setLineDash([]); // リセット
 
-    // アスファルトの路面模様（タイヤ痕など）
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-    for (let i = 0; i < ROAD.lanes; i++) {
-      const cx = ROAD.leftWall + i * laneWidth + laneWidth * 0.3;
-      ctx.fillRect(cx, 0, 8, GAME_HEIGHT);
-      ctx.fillRect(cx + laneWidth * 0.4, 0, 8, GAME_HEIGHT);
-    }
+    // 城壁が落とす荘厳な影（両脇のアンビエントシャドウ）
+    const shadowL = ctx.createLinearGradient(wallL, 0, wallL + 30, 0);
+    shadowL.addColorStop(0, 'rgba(5, 8, 12, 0.65)');
+    shadowL.addColorStop(1, 'rgba(5, 8, 12, 0)');
+    ctx.fillStyle = shadowL;
+    ctx.fillRect(wallL, 0, 30, GAME_HEIGHT);
+
+    const shadowR = ctx.createLinearGradient(wallR - 30, 0, wallR, 0);
+    shadowR.addColorStop(0, 'rgba(5, 8, 12, 0)');
+    shadowR.addColorStop(1, 'rgba(5, 8, 12, 0.65)');
+    ctx.fillStyle = shadowR;
+    ctx.fillRect(wallR - 30, 0, 30, GAME_HEIGHT);
+
+    // 3. 両脇の石造り「城壁（凸凹のある胸壁・石組みパターン）」描画
+    drawWall(0, wallL, true);
+    drawWall(wallR, GAME_WIDTH - wallR, false);
   }
 
   function drawWall(x, w, isLeft) {
-    // コンクリート壁ベース
+    // 城壁ベースの石造りグラデーション
     const grad = ctx.createLinearGradient(x, 0, x + w, 0);
     if (isLeft) {
-      grad.addColorStop(0, '#0d1117');
-      grad.addColorStop(0.8, '#30363d');
-      grad.addColorStop(1, '#6e7681');
+      grad.addColorStop(0, '#0c1016');
+      grad.addColorStop(0.6, '#242c38');
+      grad.addColorStop(1, '#3b4757');
     } else {
-      grad.addColorStop(0, '#6e7681');
-      grad.addColorStop(0.2, '#30363d');
-      grad.addColorStop(1, '#0d1117');
+      grad.addColorStop(0, '#3b4757');
+      grad.addColorStop(0.4, '#242c38');
+      grad.addColorStop(1, '#0c1016');
     }
     ctx.fillStyle = grad;
     ctx.fillRect(x, 0, w, GAME_HEIGHT);
 
-    // 壁の継ぎ目ライン（スクロール連動）
-    ctx.fillStyle = 'rgba(10, 14, 20, 0.7)';
-    for (let y = -40 + (ROAD.scrollOffset % 60); y < GAME_HEIGHT; y += 60) {
-      ctx.fillRect(x, y, w, 4);
+    // 石組み（切石積み・アシュラー・メイスンリー）の目地ライン
+    const blockH = 32;
+    const numCourses = Math.ceil(GAME_HEIGHT / blockH);
+    ctx.fillStyle = 'rgba(8, 10, 15, 0.8)';
+    for (let i = 0; i < numCourses; i++) {
+      const by = i * blockH;
+      // 水平目地
+      ctx.fillRect(x, by, w, 2);
+      // 互い違いの垂直目地
+      const vOffset = (i % 2 === 0) ? (w * 0.4) : (w * 0.7);
+      ctx.fillRect(x + vOffset, by, 2, blockH);
     }
 
-    // ガードレール反射ポール
-    const poleX = isLeft ? x + w - 4 : x + 4;
-    ctx.fillStyle = '#ffaa00';
-    for (let y = -30 + (ROAD.scrollOffset % 100); y < GAME_HEIGHT; y += 100) {
+    // 凸凹のある胸壁（銃眼・狭間・マーロン）の立体装飾
+    // 内側（戦場側）の境界に沿って凸凹の石組み胸壁を配置
+    const crenelH = 42;
+    const merlonLen = 26;
+    const battlementW = 9;
+    const bx = isLeft ? (x + w - battlementW) : x;
+
+    for (let y = 0; y < GAME_HEIGHT; y += crenelH) {
+      // 凸部（マーロン: 矢狭間のある防壁石）
+      ctx.fillStyle = '#485567';
+      ctx.fillRect(bx, y, battlementW, merlonLen);
+
+      ctx.fillStyle = '#617187';
+      ctx.fillRect(bx, y, battlementW, 2); // 天端ハイライト
+
+      // 矢狭間（アロースリット / 銃眼）
+      const slitX = isLeft ? (bx + 3) : (bx + battlementW - 5);
+      ctx.fillStyle = '#0a0d12';
+      ctx.fillRect(slitX, y + 6, 2, 14);
+
+      // 凹部（クレネル: 切り欠き開口部）
+      ctx.fillStyle = 'rgba(10, 14, 20, 0.55)';
+      ctx.fillRect(bx, y + merlonLen, battlementW, crenelH - merlonLen);
+    }
+
+    // 城壁の防衛用トーチ・篝火ブラケット（等間隔に配置された温かみのある光源）
+    const torchX = isLeft ? (x + w - 12) : (x + 12);
+    for (let ty = 60; ty < GAME_HEIGHT; ty += 160) {
+      // 鉄製ブラケット金具
+      ctx.fillStyle = '#14181f';
+      ctx.fillRect(torchX - 3, ty, 6, 8);
+      ctx.fillRect(torchX - 1, ty + 8, 2, 6);
+
+      // 篝火・炎のコア発光
+      ctx.fillStyle = '#ffaa00';
       ctx.beginPath();
-      ctx.arc(poleX, y, 3, 0, Math.PI * 2);
+      ctx.arc(torchX, ty - 2, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 周囲への柔らかなアンバー光
+      ctx.fillStyle = 'rgba(255, 140, 0, 0.12)';
+      ctx.beginPath();
+      ctx.arc(torchX, ty - 2, 16, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  /* --- プレイヤー（近代軍人テイスト）描画 --- */
+  /* --- プレイヤー（城塞防衛戦車）描画 --- */
   function drawPlayer() {
     ctx.save();
     ctx.translate(player.x, player.y);
 
-    // マズルフラッシュ
+    // マズルフラッシュ（主砲発射時の轟光）
     if (player.muzzleFlash > 0) {
       ctx.fillStyle = '#ffea00';
       ctx.beginPath();
-      ctx.arc(0, -player.height / 2 - 8, 10 + player.muzzleFlash * 2, 0, Math.PI * 2);
+      ctx.arc(0, -player.height / 2 - 12, 11 + player.muzzleFlash * 2, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // 銃器（アサルトライフル/マシンガン）
-    ctx.fillStyle = '#1f242d';
-    ctx.fillRect(-3, -player.height / 2 - 10, 6, 22);
-    ctx.fillStyle = '#484f58';
-    ctx.fillRect(-2, -player.height / 2 - 14, 4, 8); // バレル先端
+    // 戦車キャタピラ（左右の重装履帯）
+    const trackW = 8;
+    const trackH = 42;
+    [-17, 9].forEach(tx => {
+      // 履帯ベース
+      ctx.fillStyle = '#181e18';
+      ctx.beginPath();
+      ctx.roundRect(tx, -trackH / 2, trackW, trackH, 3);
+      ctx.fill();
+      ctx.strokeStyle = '#303e30';
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
-    // 胴体（タクティカル迷彩ベスト）
-    ctx.fillStyle = '#2d3b2d'; // オリーブドラブ迷彩基調
+      // 履帯トレッド（滑り止めスリット）
+      ctx.fillStyle = '#3a473a';
+      for (let ty = -trackH / 2 + 4; ty < trackH / 2; ty += 6) {
+        ctx.fillRect(tx + 1, ty, trackW - 2, 2);
+      }
+    });
+
+    // 車体（強固な装甲板ハル・オリーブドラブ迷彩）
+    ctx.fillStyle = '#2d3b2d';
     ctx.beginPath();
-    ctx.roundRect(-16, -16, 32, 34, 6);
+    ctx.roundRect(-12, -18, 24, 36, 4);
     ctx.fill();
-
-    // 迷彩パターン
-    ctx.fillStyle = '#41523c';
-    ctx.beginPath();
-    ctx.arc(-6, -4, 6, 0, Math.PI * 2);
-    ctx.arc(8, 6, 7, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#1b231b';
-    ctx.beginPath();
-    ctx.arc(4, -8, 5, 0, Math.PI * 2);
-    ctx.arc(-8, 8, 6, 0, Math.PI * 2);
-    ctx.fill();
-
-    // タクティカルハーネス・肩当て
-    ctx.fillStyle = '#161b22';
-    ctx.fillRect(-18, -12, 6, 12);
-    ctx.fillRect(12, -12, 6, 12);
-    ctx.strokeStyle = '#8b949e';
+    ctx.strokeStyle = '#4a5e4a';
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(-16, -16, 32, 34);
-
-    // 頭部（ヘルメット & ナイトビジョン風バイザー）
-    ctx.fillStyle = '#3a4a38';
-    ctx.beginPath();
-    ctx.arc(0, -6, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ヘルメット縁
-    ctx.strokeStyle = '#1b231b';
-    ctx.lineWidth = 3;
     ctx.stroke();
 
-    // タクティカルバイザー（青緑色のサイバー発光）
+    // 前面傾斜装甲板（フロントグラシスプレート）
+    ctx.fillStyle = '#3d4f3d';
+    ctx.beginPath();
+    ctx.moveTo(-10, -18);
+    ctx.lineTo(10, -18);
+    ctx.lineTo(12, -9);
+    ctx.lineTo(-12, -9);
+    ctx.closePath();
+    ctx.fill();
+
+    // 操縦手バイザー／ペリスコープ（サイバーシアン発光スリット）
     ctx.fillStyle = '#00ffcc';
-    ctx.shadowColor = '#00ffcc';
-    ctx.shadowBlur = 8;
-    ctx.fillRect(-7, -10, 14, 4);
-    ctx.shadowBlur = 0; // リセット
+    ctx.fillRect(-5, -15, 10, 2.5);
+
+    // 砲塔（旋回重装甲ターレット）
+    ctx.fillStyle = '#243024';
+    ctx.beginPath();
+    ctx.roundRect(-9, -9, 18, 18, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#506650';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // 司令塔キューポラ・ハッチ
+    ctx.fillStyle = '#394a39';
+    ctx.beginPath();
+    ctx.arc(3, 1, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 長砲身主砲（防衛戦車の重カノン砲）
+    ctx.fillStyle = '#1c241c';
+    ctx.fillRect(-2.5, -player.height / 2 - 8, 5, 20); // 砲身
+    ctx.fillStyle = '#445544';
+    ctx.fillRect(-1.5, -player.height / 2 - 8, 3, 20); // バレルハイライト
+
+    // マズルブレーキ（砲口先端の反動抑制器）
+    ctx.fillStyle = '#161b16';
+    ctx.fillRect(-4.5, -player.height / 2 - 12, 9, 5);
+    ctx.fillStyle = '#6e7681';
+    ctx.fillRect(-3, -player.height / 2 - 12, 6, 1.5);
 
     ctx.restore();
 
@@ -2906,29 +3057,71 @@
     ctx.restore();
   }
 
-  /* --- 防衛ライン（画面最下部の赤いライン）描画 --- */
+  /* --- 城塞防衛ライン（城門・要塞バリケード）描画 --- */
   function drawDefenseLine() {
     ctx.save();
-    // ネオン発光バー
-    ctx.strokeStyle = '#ff1a40';
-    ctx.lineWidth = 4;
-    ctx.shadowColor = '#ff0033';
-    ctx.shadowBlur = 14;
 
+    const wallL = ROAD.leftWall;
+    const wallR = ROAD.rightWall;
+    const lineW = (wallR - wallL) + 16;
+    const startX = wallL - 8;
+
+    // 1. 防壁バリケード直下（城門内側）の安全エリア床
+    ctx.fillStyle = 'rgba(10, 14, 20, 0.55)';
+    ctx.fillRect(startX, DEFENSE_Y, lineW, GAME_HEIGHT - DEFENSE_Y);
+
+    // 2. 要塞防護エナジーシールド発光（ゴールド＆アンバーの重厚な警戒バリア）
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#ff6600';
+    ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.moveTo(ROAD.leftWall - 10, DEFENSE_Y);
-    ctx.lineTo(ROAD.rightWall + 10, DEFENSE_Y);
+    ctx.moveTo(startX, DEFENSE_Y);
+    ctx.lineTo(startX + lineW, DEFENSE_Y);
     ctx.stroke();
+    ctx.shadowBlur = 0; // リセット
 
-    // 警戒ハザードパターン (ライン直下)
-    ctx.fillStyle = 'rgba(255, 0, 50, 0.15)';
-    ctx.fillRect(ROAD.leftWall - 10, DEFENSE_Y, (ROAD.rightWall - ROAD.leftWall) + 20, GAME_HEIGHT - DEFENSE_Y);
+    // 3. 重装甲バリケード梁（鉄骨＆頑強な装甲スチールプレート）
+    ctx.fillStyle = '#222a36';
+    ctx.fillRect(startX, DEFENSE_Y - 4, lineW, 8);
+    ctx.fillStyle = '#3a4656';
+    ctx.fillRect(startX, DEFENSE_Y - 4, lineW, 2); // 上面ハイライト
+    ctx.fillStyle = '#10141b';
+    ctx.fillRect(startX, DEFENSE_Y + 2, lineW, 2); // 下面シャドウ
 
-    // テキスト「DEFENSE LINE」
-    ctx.fillStyle = '#ff4d4d';
+    // 4. 上向き防壁スパイク（敵の侵入を拒む対戦車バリケード杭）
+    const spikeW = 16;
+    const numSpikes = Math.floor(lineW / spikeW);
+    ctx.fillStyle = '#48576c';
+    for (let i = 0; i < numSpikes; i++) {
+      const sx = startX + i * spikeW;
+      ctx.beginPath();
+      ctx.moveTo(sx, DEFENSE_Y - 4);
+      ctx.lineTo(sx + spikeW * 0.5, DEFENSE_Y - 11);
+      ctx.lineTo(sx + spikeW, DEFENSE_Y - 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // スパイクのエッジ陰影
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // 5. リベットボルト装飾
+    ctx.fillStyle = '#c9d1d9';
+    for (let rx = startX + 8; rx < startX + lineW; rx += 24) {
+      ctx.fillRect(rx - 1.5, DEFENSE_Y - 2, 3, 3);
+    }
+
+    // 6. 城塞防衛ライン 警告テキスト
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('⚠ DANGER DEFENSE LINE ⚠', GAME_WIDTH / 2, DEFENSE_Y - 8);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 3;
+    ctx.strokeText('🛡️ RAMPART BARRICADE LINE 🛡️', GAME_WIDTH / 2, DEFENSE_Y - 15);
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillText('🛡️ RAMPART BARRICADE LINE 🛡️', GAME_WIDTH / 2, DEFENSE_Y - 15);
 
     ctx.restore();
   }
