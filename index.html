@@ -63,7 +63,6 @@
       z-index: 10;
       pointer-events: none;
       font-weight: 700;
-      text-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
       font-size: 13px;
       letter-spacing: 0.8px;
     }
@@ -76,21 +75,34 @@
 
     .hud-label {
       font-size: 10px;
-      color: #7d8590;
+      color: #8b949e;
       text-transform: uppercase;
+      font-weight: 800;
+      text-shadow: 1px 1px 0px #000000, 2px 2px 2px rgba(0, 0, 0, 0.9);
     }
 
     .hud-value {
-      font-size: 16px;
-      color: #58a6ff;
+      font-size: 17px;
+      color: #79c0ff;
       font-family: 'Courier New', Courier, monospace;
       font-weight: bold;
+      text-shadow: 2px 2px 0px #000000, 3px 3px 3px rgba(0, 0, 0, 0.95);
+    }
+
+    /* スコア表示専用: 右下に黒い影を付けて背景に埋もれず超くっきり視認可能に */
+    #hudScore {
+      color: #ffffff;
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1.2px;
+      text-shadow: 2px 2px 0px #000000, 3px 3px 1px #000000, 3px 3px 4px rgba(0, 0, 0, 0.95);
     }
 
     .bomb-icons {
       color: #ff5555;
       font-size: 15px;
       letter-spacing: 3px;
+      text-shadow: 2px 2px 0px #000000, 2px 2px 3px rgba(0, 0, 0, 0.9);
     }
 
     /* 下部UIボタンバー */
@@ -347,9 +359,10 @@
 
     .result-stats {
       font-size: 15px;
-      color: #c9d1d9;
+      color: #e6edf3;
       margin-bottom: 22px;
       line-height: 1.8;
+      text-shadow: 2px 2px 0px #000000, 2px 2px 3px rgba(0, 0, 0, 0.9);
     }
 
     /* ミュート切替ボタン */
@@ -670,38 +683,42 @@
 
   // 出現密度パラメータ定義
   const DENSITY_CONFIGS = {
-    normal: { // EASY: 控えめで処理が軽く初心者向け
+    normal: { // EASY: DEVILの55%、固さ1(白のみ)
       name: 'EASY',
-      perRow: 10,
-      baseRows: 1,
-      maxRows: 3,
-      growthSec: 35,
-      baseInterval: 170,
-      minInterval: 65,
-      intervalDecay: 0.5
-    },
-    hard: { // NORMAL: ほどよい手応え
-      name: 'NORMAL',
+      ratio: 0.55,
       perRow: 14,
       baseRows: 2,
       maxRows: 4,
-      growthSec: 25,
-      baseInterval: 140,
-      minInterval: 45,
-      intervalDecay: 0.65
+      growthSec: 18,
+      baseInterval: 90,
+      minInterval: 25,
+      intervalDecay: 0.9
     },
-    expert: { // HARD: かなり歯ごたえのある大群
-      name: 'HARD',
-      perRow: 18,
+    hard: { // NORMAL: DEVILの70%、固さ1(白のみ)
+      name: 'NORMAL',
+      ratio: 0.70,
+      perRow: 17,
       baseRows: 2,
       maxRows: 5,
-      growthSec: 20,
-      baseInterval: 110,
-      minInterval: 35,
-      intervalDecay: 0.75
+      growthSec: 18,
+      baseInterval: 90,
+      minInterval: 25,
+      intervalDecay: 0.9
     },
-    mega: { // DEVIL: 画面上部が敵の球体でびっしり埋め尽くされるレベル
+    expert: { // HARD: DEVILの80%、固さ1と2のみ
+      name: 'HARD',
+      ratio: 0.80,
+      perRow: 19,
+      baseRows: 2,
+      maxRows: 5,
+      growthSec: 18,
+      baseInterval: 90,
+      minInterval: 25,
+      intervalDecay: 0.9
+    },
+    mega: { // DEVIL: 今と同じ (100% / 白・灰・黒)
       name: 'DEVIL',
+      ratio: 1.00,
       perRow: 22,
       baseRows: 2,
       maxRows: 6,
@@ -1233,6 +1250,7 @@
   // スポーンタイマー
   let enemySpawnTimer = 0;
   let supplySpawnTimer = 300; // 最初のアイテムを5秒後に出す
+  let lastObstacleSpawnTime = -999; // アーマー(旧バキュラ)の前回出現時刻
   // 中ボス: 10秒禁止 → 600フレーム + 初回インターバル(900f≒15秒) = 1500から
   let midBossTimer = 1500;
   let bossNextTime = 0; // 制限時間に応じたボス出現計画
@@ -1257,6 +1275,7 @@
     zakoExplosions = [];
     enemySpawnTimer = 0;
     supplySpawnTimer = 300; // 最初のアイテムを5秒後に出す
+    lastObstacleSpawnTime = -999;
     // 中ボス: 10秒禁止(600f) + 次回インターバル(900f) = 1500f待ち
     midBossTimer = 1500;
     // 大ボス: 30秒(1800f)後から出現を許可
@@ -1411,6 +1430,11 @@
     let bWidth = 34;
     let bHeight = 30;
 
+    // 画面上にすでに障害物(ARMOR/金属板)が存在するか
+    const hasActiveObstacle = supplyBoxes.some(b => b.type === 'obstacle');
+    // 要望: 最初の30秒は出ない、いきなり2連続で出現して詰まないよう十分なインターバル(最低35秒以上)を確保
+    const canSpawnObstacle = (gameElapsed >= 30) && !hasActiveObstacle && ((gameElapsed - lastObstacleSpawnTime) >= 35);
+
     // アイテム種類: spread / option / bomb_black / bomb_red / obstacle（障害物/金属板）の5系統
     const rnd = Math.random();
     let boxType;
@@ -1420,11 +1444,12 @@
       boxType = 'option';
     } else if (rnd < 0.64) {
       boxType = 'bomb_black';
-    } else if (rnd < 0.80) {
+    } else if (rnd < 0.80 || !canSpawnObstacle) {
       boxType = 'bomb_red';
     } else {
-      // 障害物: 金属板（防壁プレート）。固さは中ボスと完全に同じ！
+      // 障害物: 金属板（防壁プレート・ARMOR）。固さは中ボスと完全に同じ！
       boxType = 'obstacle';
+      lastObstacleSpawnTime = gameElapsed;
       boxHp = 80 + Math.floor(gameElapsed * 0.6); // 中ボス(TANK)と同じHP計算式
       bWidth = 52;
       bHeight = 26;
@@ -1451,28 +1476,47 @@
     const patterns = ['line', 'wide_line', 'v_shape', 'cluster'];
     const p = patterns[Math.floor(Math.random() * patterns.length)];
 
-    // 選択された密度に応じた列数と行数
-    const perRow = dCfg.perRow;
-    const rows = Math.min(dCfg.baseRows + Math.floor(gameElapsed / dCfg.growthSec), dCfg.maxRows);
-    const waveSize = perRow * rows;
+    // DEVIL基準の行数・敵数に対する比率で出現量を算出
+    // DEVIL(mega): 22列 × (2〜6行) = 44〜132体
+    const devilRows = Math.min(2 + Math.floor(gameElapsed / 18), 6);
+    const devilWaveSize = 22 * devilRows;
+    const waveSize = Math.max(dCfg.perRow, Math.round(devilWaveSize * (dCfg.ratio || 1.0)));
 
+    const perRow = dCfg.perRow;
     const roadWidth = ROAD.rightWall - ROAD.leftWall;
     const spacing = roadWidth / perRow;
 
     for (let i = 0; i < waveSize; i++) {
-      // HP: 白5, 灰4, 黒1の割合 (白50%, 灰40%, 黒10%)
-      const rVal = Math.random() * 10;
       let hp = 1;
       let colorType = 'white';
-      if (rVal < 5) {
+
+      if (chosenDensity === 'normal' || chosenDensity === 'hard') {
+        // EASY & NORMAL: 固さ1 (白のみ)
         hp = 1;
         colorType = 'white';
-      } else if (rVal < 9) {
-        hp = 2;
-        colorType = 'gray';
+      } else if (chosenDensity === 'expert') {
+        // HARD: 固さ1と2のみ (白60%, 灰40%)
+        const rVal = Math.random() * 10;
+        if (rVal < 6.0) {
+          hp = 1;
+          colorType = 'white';
+        } else {
+          hp = 2;
+          colorType = 'gray';
+        }
       } else {
-        hp = 3;
-        colorType = 'black';
+        // DEVIL: 今と同じ (白50%, 灰40%, 黒10%)
+        const rVal = Math.random() * 10;
+        if (rVal < 5) {
+          hp = 1;
+          colorType = 'white';
+        } else if (rVal < 9) {
+          hp = 2;
+          colorType = 'gray';
+        } else {
+          hp = 3;
+          colorType = 'black';
+        }
       }
 
       const row = Math.floor(i / perRow);
