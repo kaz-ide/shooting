@@ -710,6 +710,61 @@
         osc.stop(t + idx * 0.15 + 0.2);
       });
     }
+    tankFire() {
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(260, t);
+      osc.frequency.exponentialRampToValueAtTime(55, t + 0.14);
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.14);
+      osc.connect(gain);
+      gain.connect(this.out);
+      osc.onended = () => {
+        try { osc.disconnect(); gain.disconnect(); } catch (e) {}
+      };
+      osc.start(t);
+      osc.stop(t + 0.14);
+    }
+    bossLaser() {
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1100, t);
+      osc.frequency.exponentialRampToValueAtTime(220, t + 0.22);
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.005, t + 0.22);
+      osc.connect(gain);
+      gain.connect(this.out);
+      osc.onended = () => {
+        try { osc.disconnect(); gain.disconnect(); } catch (e) {}
+      };
+      osc.start(t);
+      osc.stop(t + 0.22);
+    }
+    stun() {
+      if (!this.enabled || !this.ctx || !this.out) return;
+      const t = this.ctx.currentTime;
+      // 電撃スタン音（ビリビリッとしたバズ音）
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, t);
+      osc.frequency.linearRampToValueAtTime(80, t + 0.25);
+      gain.gain.setValueAtTime(0.20, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+      osc.connect(gain);
+      gain.connect(this.out);
+      osc.onended = () => {
+        try { osc.disconnect(); gain.disconnect(); } catch (e) {}
+      };
+      osc.start(t);
+      osc.stop(t + 0.25);
+    }
   }
 
   const sfx = new SoundFX();
@@ -1178,7 +1233,8 @@
     // パワーアップ状態
     shotLevel: 1,      // 1〜5段階（初期1列、2:縦2倍、3:2列、4:3列、5:5方向）
     optionsCount: 0,   // 0〜6個（1:左, 2:右, 3:左, 4:右, 5:左, 6:右）
-    muzzleFlash: 0
+    muzzleFlash: 0,
+    stunTimer: 0       // ボス攻撃被弾時のスタンタイマー（秒）
   };
 
   // オプション配置座標計算ヘルパー（最大6個：1:左1, 2:右1, 3:左2, 4:右2, 5:左3, 6:右3）
@@ -1205,12 +1261,14 @@
 
   // 配列管理
   let bullets = [];
+  let enemyBullets = []; // ボス（中ボス砲弾・大ボスレーザー）の攻撃弾
   let enemies = [];
   let supplyBoxes = []; // パワーアップ出現ボックス
   let explosions = [];  // ボム大爆発 & 爆発
   let hitEffects = [];  // パーティクル
   let popupTexts = [];  // 残りスタミナ等の数値ポップアップ
   let zakoExplosions = []; // ザコ敵撃破時の超軽量2コマ連番爆発スプライト
+  let laserTimer = 0;     // レーザーの有効時間（30秒カウントダウン）
 
   // ボム用フラッシュ（黒ボム: 弱め白 / 赤ボム: 強烈赤フラッシュ）
   let bombFlashAlpha = 0;
@@ -1436,7 +1494,10 @@
     player.shotLevel = 1;
     player.optionsCount = 0;
     player.shootInterval = 12;
+    player.stunTimer = 0;
+    laserTimer = 0;
     bullets = [];
+    enemyBullets = [];
     enemies = [];
     supplyBoxes = [];
     explosions = [];
@@ -1466,6 +1527,8 @@
     sfx.bomb();
     // ボム発動中および画面全滅処理中は個別の敵爆発音の新規生成を確実にミュート
     sfx.bombActiveUntil = performance.now() + 1200;
+    // ボム発動で敵の砲弾・レーザー光線を一掃消滅
+    enemyBullets = [];
 
     if (isRed) {
       screenShake = 28;
@@ -1526,7 +1589,7 @@
     supplyBoxes.forEach(box => {
       if (box.type === 'obstacle') {
         const dmg = isRed ? 35 : 12;
-        box.hp -= dmg;
+        box.hp = Math.max(0, Math.round(box.hp - dmg));
         createPopupText(box.x, box.y - 25, `-${dmg}`, isRed ? '#ff4444' : '#ffcc00');
         if (box.hp <= 0 && !box.dead) {
           box.dead = true;
@@ -1550,6 +1613,7 @@
 
   function triggerBomb() {
     if (gameState !== 'PLAYING') return;
+    if (player.stunTimer > 0) return; // スタン中はボム発動不可
     if (!bombs || bombs.length === 0) return;
     const bombType = bombs.shift(); // 先頭のボム（最古）を取り出して使用
     updateHUD();
@@ -1716,6 +1780,19 @@
         const cx = ROAD.leftWall + 40 + Math.random() * (roadWidth - 80);
         x = cx + (Math.random() * roadWidth * 0.6 - roadWidth * 0.3);
         y = -20 - (Math.random() * 40) - row * 22;
+      }
+
+      // 大ボス出現中の場合、大ボス直上への重なり生成を回避（左右の石畳へ展開）
+      const onScreenBoss = enemies.find(e => e.type === 'boss');
+      if (onScreenBoss) {
+        const bW = onScreenBoss.radius * 1.5;
+        if (Math.abs(y - onScreenBoss.y) < onScreenBoss.radius + 30 && Math.abs(x - onScreenBoss.x) < bW) {
+          if (x < onScreenBoss.x) {
+            x = Math.max(ROAD.leftWall + 10, onScreenBoss.x - bW - 8 - Math.random() * 10);
+          } else {
+            x = Math.min(ROAD.rightWall - 10, onScreenBoss.x + bW + 8 + Math.random() * 10);
+          }
+        }
       }
 
       enemies.push({
@@ -1916,6 +1993,18 @@
     // HUD更新（1秒ごとまたはフレーム）
     updateHUD();
 
+    // レーザーの有効時間管理（仕様: 30秒のみ有効、時間経過で1つ前のLv.6に戻る）
+    if (player.shotLevel >= 7) {
+      laserTimer -= delta;
+      if (laserTimer <= 0) {
+        laserTimer = 0;
+        player.shotLevel = 6; // 1つ前の状態 (Lv.6: 7-WAY MEGA SPREAD) に戻る
+        activeLaser = null;
+        createPopupText(player.x, player.y - 45, '⚠️ LASER TIME EXPIRED -> Lv.6', '#ff9900');
+        updateHUD();
+      }
+    }
+
     // 画面揺れ減衰
     if (screenShake > 0) screenShake *= 0.88;
     if (screenShake < 0.2) screenShake = 0;
@@ -1923,20 +2012,41 @@
     // 道路スクロール
     ROAD.scrollOffset = (ROAD.scrollOffset + ROAD.speed) % 80;
 
-    // プレイヤー移動 (キーボード / ゲームパッド / タッチ / クリック)
-    let moveDir = 0;
-    if (keys.left || gpMoveDir < 0) moveDir -= 1;
-    if (keys.right || gpMoveDir > 0) moveDir += 1;
-
-    if (moveDir !== 0) {
-      player.x += moveDir * player.speed;
+    // プレイヤー行動可否判定（ボス攻撃被弾時のスタン状態：移動＆攻撃不可）
+    const isStunned = (player.stunTimer > 0);
+    if (isStunned) {
+      player.stunTimer -= delta;
+      if (player.stunTimer < 0) player.stunTimer = 0;
       targetPlayerX = null;
-    } else if (targetPlayerX !== null) {
-      const diff = targetPlayerX - player.x;
-      if (Math.abs(diff) > 2) {
-        player.x += Math.sign(diff) * Math.min(player.speed, Math.abs(diff));
-      } else {
+      // スタン中の電撃スパーク
+      if (Math.random() < 0.4 && hitEffects.length < 80) {
+        hitEffects.push({
+          x: player.x + (Math.random() * 24 - 12),
+          y: player.y + (Math.random() * 24 - 12),
+          vx: (Math.random() - 0.5) * 3,
+          vy: (Math.random() - 0.5) * 3,
+          life: 0.35,
+          decay: 0.09,
+          color: (player.stunTimer > 1.5) ? '#ff3366' : '#00f7ff',
+          size: 2.5
+        });
+      }
+    } else {
+      // プレイヤー移動 (キーボード / ゲームパッド / タッチ / クリック)
+      let moveDir = 0;
+      if (keys.left || gpMoveDir < 0) moveDir -= 1;
+      if (keys.right || gpMoveDir > 0) moveDir += 1;
+
+      if (moveDir !== 0) {
+        player.x += moveDir * player.speed;
         targetPlayerX = null;
+      } else if (targetPlayerX !== null) {
+        const diff = targetPlayerX - player.x;
+        if (Math.abs(diff) > 2) {
+          player.x += Math.sign(diff) * Math.min(player.speed, Math.abs(diff));
+        } else {
+          targetPlayerX = null;
+        }
       }
     }
 
@@ -1945,16 +2055,18 @@
     if (player.x < ROAD.leftWall + pMargin) player.x = ROAD.leftWall + pMargin;
     if (player.x > ROAD.rightWall - pMargin) player.x = ROAD.rightWall - pMargin;
 
-    // 自動射撃（自機: 2段階目以降は弾数を縦方向に2倍＝インターバル半減）
-    player.shootCooldown--;
-    if (player.shootCooldown <= 0) {
-      fireBullets();
-      player.shootCooldown = (player.shotLevel >= 2) ? 6 : player.shootInterval;
+    // 自動射撃（自機: スタン中は射撃不可）
+    if (!isStunned) {
+      player.shootCooldown--;
+      if (player.shootCooldown <= 0) {
+        fireBullets();
+        player.shootCooldown = (player.shotLevel >= 2) ? 6 : player.shootInterval;
+      }
     }
     if (player.muzzleFlash > 0) player.muzzleFlash--;
 
-    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、手前から最大20体貫通で遮断）
-    if (player.shotLevel >= 7) {
+    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中は照射不可、手前から最大20体貫通で遮断）
+    if (player.shotLevel >= 7 && !isStunned) {
       if (laserCooldown > 0) laserCooldown--;
       if (laserCooldown <= 0) {
         // 0.2秒（12フレーム）の間を開けて発射
@@ -2022,7 +2134,7 @@
         supplyBoxes.forEach(box => {
           if (box.type === 'obstacle' && Math.abs(box.x - player.x) <= box.width / 2 + 8 &&
               box.y >= startY - laserLength && box.y <= startY) {
-            box.hp -= activeLaser.damage;
+            box.hp = Math.max(0, Math.round((box.hp - activeLaser.damage) * 10) / 10);
             sfx.metalHit();
             hitEffects.push({
               x: box.x,
@@ -2049,8 +2161,8 @@
       }
     }
 
-    // オプション独立射撃（仕様: 自機の弾レベル - 1、最大4段階目まで(3列)）
-    if (player.optionsCount > 0) {
+    // オプション独立射撃（仕様: 自機の弾レベル - 1、最大4段階目まで(3列)、スタン中は射撃不可）
+    if (player.optionsCount > 0 && !isStunned) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
         const optLevel = Math.min(4, Math.max(1, (player.shotLevel || 1) - 1));
@@ -2140,7 +2252,7 @@
         const b = bullets[j];
         if (Math.abs(b.x - box.x) < box.width / 2 && Math.abs(b.y - box.y) < box.height / 2) {
           bullets.splice(j, 1);
-          box.hp -= (b.damage || 1);
+          box.hp = Math.max(0, Math.round((box.hp - (b.damage || 1)) * 10) / 10);
           if (box.type === 'obstacle') {
             sfx.metalHit();
             hitEffects.push({
@@ -2184,6 +2296,9 @@
 
           if (player.shotLevel < maxAllowedLvl) {
             player.shotLevel++;
+            if (player.shotLevel >= 7) {
+              laserTimer = 30.0; // レーザー有効時間30秒
+            }
             const labels = [
               '',
               '1-WAY',
@@ -2192,15 +2307,22 @@
               '3-WAY',
               '5-WAY SPREAD',
               '7-WAY MEGA SPREAD',
-              'HYPER LASER BEAM (Lv.7)'
+              'HYPER LASER BEAM (Lv.7 30s)'
             ];
             createPopupText(player.x, player.y - 45, `SHOT Lv.${player.shotLevel}: ${labels[player.shotLevel]}!`, '#ffea00');
           } else {
-            score += 400;
-            if (!isHighDensity && player.shotLevel === 5) {
-              createPopupText(player.x, player.y - 45, 'SHOT MAX Lv.5 [HARD/DEVILでLv.7解放]!', '#ffea00');
+            if (player.shotLevel >= 7) {
+              // レーザー発動中にパワーアップを獲得したら30秒に戻る（+30秒ではない）
+              laserTimer = 30.0;
+              createPopupText(player.x, player.y - 45, '⚡ LASER RECHARGED: 30s! ⚡', '#00f7ff');
+              score += 300;
             } else {
-              createPopupText(player.x, player.y - 45, 'SHOT LEVEL MAX! +400pts', '#00ffff');
+              score += 400;
+              if (!isHighDensity && player.shotLevel === 5) {
+                createPopupText(player.x, player.y - 45, 'SHOT MAX Lv.5 [HARD/DEVILでLv.7解放]!', '#ffea00');
+              } else {
+                createPopupText(player.x, player.y - 45, 'SHOT LEVEL MAX! +400pts', '#00ffff');
+              }
             }
           }
         } else if (box.type === 'option') {
@@ -2275,6 +2397,7 @@
     }
 
     // 敵の移動 & 判定
+    const bigBoss = enemies.find(e => e.type === 'boss' && e.hp > 0);
     for (let i = enemies.length - 1; i >= 0; i--) {
       const e = enemies[i];
       e.y += e.vy;
@@ -2282,6 +2405,19 @@
         e.x += e.vx;
         if (e.x < ROAD.leftWall + e.radius || e.x > ROAD.rightWall - e.radius) {
           e.vx = -e.vx;
+        }
+      }
+
+      // 大ボスと兵士の重なり防止（移動城塞の巨体で兵士を外側・左右の石畳へ押し出し）
+      if (e.type === 'normal' && bigBoss) {
+        const bHalfW = bigBoss.radius * 1.55;
+        const bHalfH = bigBoss.radius * 0.95;
+        if (Math.abs(e.x - bigBoss.x) < bHalfW + e.radius && Math.abs(e.y - bigBoss.y) < bHalfH + e.radius) {
+          if (e.x < bigBoss.x) {
+            e.x = Math.max(ROAD.leftWall + e.radius, bigBoss.x - bHalfW - e.radius - 2);
+          } else {
+            e.x = Math.min(ROAD.rightWall - e.radius, bigBoss.x + bHalfW + e.radius + 2);
+          }
         }
       }
 
@@ -2402,6 +2538,137 @@
       }
     }
 
+    // ===== ボスの攻撃発射処理 =====
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
+      if (e.hp <= 0) continue;
+
+      if (e.type === 'midboss') {
+        // 中ボス（戦車）の攻撃: 正面へ砲弾発射（遅め・当たったら1秒間スタン）
+        e.attackCooldown = (e.attackCooldown || (120 + Math.floor(Math.random() * 60))) - 1;
+        if (e.y > 10 && e.y < GAME_HEIGHT * 0.72 && e.attackCooldown <= 0) {
+          e.attackCooldown = 150 + Math.floor(Math.random() * 50); // 約2.5〜3.3秒間隔
+          const gunY = e.y + e.radius * 1.35;
+          enemyBullets.push({
+            x: e.x,
+            y: gunY,
+            vx: 0,
+            vy: 2.6, // 遅めの砲弾
+            radius: 5.5,
+            type: 'midboss_shell',
+            stunDuration: 1.0
+          });
+          sfx.tankFire();
+          // 発射マズルフラッシュ火花
+          if (hitEffects.length < 80) {
+            for (let k = 0; k < 5; k++) {
+              hitEffects.push({
+                x: e.x + (Math.random() * 8 - 4),
+                y: gunY + Math.random() * 6,
+                vx: (Math.random() - 0.5) * 3,
+                vy: Math.random() * 3 + 1,
+                life: 0.35,
+                decay: 0.08,
+                color: '#ff9900',
+                size: 2.8
+              });
+            }
+          }
+        }
+      } else if (e.type === 'boss') {
+        // 大ボス（移動城塞）の攻撃: 左右15度以内のいずれか1方向に高速レーザー光線（当たったら3秒間スタン）
+        e.attackCooldown = (e.attackCooldown || (140 + Math.floor(Math.random() * 60))) - 1;
+        if (e.y > -10 && e.y < GAME_HEIGHT * 0.68 && e.attackCooldown <= 0) {
+          e.attackCooldown = 190 + Math.floor(Math.random() * 60); // 約3.2〜4.2秒間隔
+
+          const gunX = e.x;
+          const gunY = e.y + e.radius * 0.75;
+          const targetAngle = Math.atan2(player.x - gunX, player.y - gunY);
+          const maxAngle = 15 * Math.PI / 180; // 15度
+          let beamAngle = Math.max(-maxAngle, Math.min(maxAngle, targetAngle));
+          beamAngle += (Math.random() * 4 - 2) * Math.PI / 180; // わずかな揺らぎ
+          beamAngle = Math.max(-maxAngle, Math.min(maxAngle, beamAngle));
+
+          const beamSpeed = 7.0; // やや速めの光線
+          enemyBullets.push({
+            x: gunX,
+            y: gunY,
+            vx: Math.sin(beamAngle) * beamSpeed,
+            vy: Math.cos(beamAngle) * beamSpeed,
+            angle: beamAngle,
+            radius: 6,
+            length: 44,
+            width: 7,
+            type: 'boss_laser',
+            stunDuration: 3.0
+          });
+          sfx.bossLaser();
+          // 城塞主砲のマズルフラッシュ
+          if (hitEffects.length < 80) {
+            for (let k = 0; k < 6; k++) {
+              hitEffects.push({
+                x: gunX + (Math.random() * 14 - 7),
+                y: gunY + Math.random() * 10,
+                vx: (Math.random() - 0.5) * 4,
+                vy: Math.random() * 4 + 2,
+                life: 0.4,
+                decay: 0.08,
+                color: '#ff2255',
+                size: 3.2
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // ===== 敵弾（砲弾・レーザー光線）の移動 & プレイヤーとの当たり判定 =====
+    for (let i = enemyBullets.length - 1; i >= 0; i--) {
+      const eb = enemyBullets[i];
+      eb.x += eb.vx;
+      eb.y += eb.vy;
+
+      // 画面外で消去
+      if (eb.y > GAME_HEIGHT + 35 || eb.x < ROAD.leftWall - 35 || eb.x > ROAD.rightWall + 35) {
+        enemyBullets.splice(i, 1);
+        continue;
+      }
+
+      // プレイヤー自機との当たり判定 (player.x, player.y, 半径14px)
+      const pR = 14;
+      const dx = eb.x - player.x;
+      const dy = eb.y - player.y;
+      const hitDist = eb.radius + pR;
+
+      if (dx * dx + dy * dy < hitDist * hitDist) {
+        // ボス攻撃が命中！指定秒数スタン付与（移動＆攻撃不可）
+        const stunSec = eb.stunDuration || 1.0;
+        player.stunTimer = Math.max(player.stunTimer, stunSec);
+        screenShake = (stunSec >= 3.0) ? 24 : 14;
+        sfx.stun();
+
+        // 被弾スパーク発生
+        for (let k = 0; k < 12; k++) {
+          hitEffects.push({
+            x: player.x + (Math.random() * 24 - 12),
+            y: player.y + (Math.random() * 24 - 12),
+            vx: (Math.random() - 0.5) * 6,
+            vy: (Math.random() - 0.5) * 6,
+            life: 0.6,
+            decay: 0.06,
+            color: (stunSec >= 3.0) ? '#ff2255' : '#ffea00',
+            size: 3.2
+          });
+        }
+
+        const stunText = (stunSec >= 3.0) ? '⚡ EMP STUN! 3秒 移動攻撃不能 ⚡' : '⚡ STUN! 1秒 移動攻撃不能 ⚡';
+        const textColor = (stunSec >= 3.0) ? '#ff3344' : '#ffea00';
+        createPopupText(player.x, player.y - 48, stunText, textColor);
+
+        enemyBullets.splice(i, 1);
+      }
+    }
+
     // 壊れた補給箱のクリーンアップ
     for (let i = supplyBoxes.length - 1; i >= 0; i--) {
       if (supplyBoxes[i].hp <= 0) {
@@ -2461,6 +2728,9 @@
 
     // 3. 敵キャラクター描画
     drawEnemies();
+
+    // 3.5 敵弾（中ボス砲弾・大ボスレーザー）描画
+    drawEnemyBullets();
 
     // 4. プレイヤー & オプション描画
     drawPlayer();
@@ -2653,11 +2923,27 @@
 
   /* --- プレイヤー（城塞防衛戦車）描画 --- */
   function drawPlayer() {
+    const isStunned = (player.stunTimer > 0);
+
     ctx.save();
     ctx.translate(player.x, player.y);
 
-    // マズルフラッシュ（主砲発射時の轟光）
-    if (player.muzzleFlash > 0) {
+    // スタン中の電撃スパークエフェクト（車体周辺のスパーク稲妻）
+    if (isStunned) {
+      ctx.strokeStyle = (player.stunTimer > 1.5) ? '#ff3366' : '#00f7ff';
+      ctx.lineWidth = 1.6;
+      for (let s = 0; s < 3; s++) {
+        ctx.beginPath();
+        const ax = (Math.random() - 0.5) * 44;
+        const ay = (Math.random() - 0.5) * 50;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax + (Math.random() - 0.5) * 16, ay + (Math.random() - 0.5) * 16);
+        ctx.stroke();
+      }
+    }
+
+    // マズルフラッシュ（主砲発射時の轟光・スタン中はなし）
+    if (player.muzzleFlash > 0 && !isStunned) {
       ctx.fillStyle = '#ffea00';
       ctx.beginPath();
       ctx.arc(0, -player.height / 2 - 12, 11 + player.muzzleFlash * 2, 0, Math.PI * 2);
@@ -2669,32 +2955,32 @@
     const trackH = 42;
     [-17, 9].forEach(tx => {
       // 履帯ベース
-      ctx.fillStyle = '#181e18';
+      ctx.fillStyle = isStunned ? '#121612' : '#181e18';
       ctx.beginPath();
       ctx.roundRect(tx, -trackH / 2, trackW, trackH, 3);
       ctx.fill();
-      ctx.strokeStyle = '#303e30';
+      ctx.strokeStyle = isStunned ? '#202820' : '#303e30';
       ctx.lineWidth = 1;
       ctx.stroke();
 
       // 履帯トレッド（滑り止めスリット）
-      ctx.fillStyle = '#3a473a';
+      ctx.fillStyle = isStunned ? '#252e25' : '#3a473a';
       for (let ty = -trackH / 2 + 4; ty < trackH / 2; ty += 6) {
         ctx.fillRect(tx + 1, ty, trackW - 2, 2);
       }
     });
 
     // 車体（強固な装甲板ハル・オリーブドラブ迷彩）
-    ctx.fillStyle = '#2d3b2d';
+    ctx.fillStyle = isStunned ? '#1f281f' : '#2d3b2d';
     ctx.beginPath();
     ctx.roundRect(-12, -18, 24, 36, 4);
     ctx.fill();
-    ctx.strokeStyle = '#4a5e4a';
+    ctx.strokeStyle = isStunned ? '#344234' : '#4a5e4a';
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
     // 前面傾斜装甲板（フロントグラシスプレート）
-    ctx.fillStyle = '#3d4f3d';
+    ctx.fillStyle = isStunned ? '#2b382b' : '#3d4f3d';
     ctx.beginPath();
     ctx.moveTo(-10, -18);
     ctx.lineTo(10, -18);
@@ -2703,38 +2989,77 @@
     ctx.closePath();
     ctx.fill();
 
-    // 操縦手バイザー／ペリスコープ（サイバーシアン発光スリット）
-    ctx.fillStyle = '#00ffcc';
+    // 操縦手バイザー／ペリスコープ（サイバーシアン発光スリット、スタン時は点滅/消灯）
+    ctx.fillStyle = isStunned ? ((Math.sin(performance.now() * 0.02) > 0) ? '#ff3366' : '#222222') : '#00ffcc';
     ctx.fillRect(-5, -15, 10, 2.5);
 
     // 砲塔（旋回重装甲ターレット）
-    ctx.fillStyle = '#243024';
+    ctx.fillStyle = isStunned ? '#192219' : '#243024';
     ctx.beginPath();
     ctx.roundRect(-9, -9, 18, 18, 4);
     ctx.fill();
-    ctx.strokeStyle = '#506650';
+    ctx.strokeStyle = isStunned ? '#394939' : '#506650';
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
     // 司令塔キューポラ・ハッチ
-    ctx.fillStyle = '#394a39';
+    ctx.fillStyle = isStunned ? '#273327' : '#394a39';
     ctx.beginPath();
     ctx.arc(3, 1, 4.5, 0, Math.PI * 2);
     ctx.fill();
 
     // 長砲身主砲（防衛戦車の重カノン砲）
-    ctx.fillStyle = '#1c241c';
+    ctx.fillStyle = isStunned ? '#141a14' : '#1c241c';
     ctx.fillRect(-2.5, -player.height / 2 - 8, 5, 20); // 砲身
-    ctx.fillStyle = '#445544';
+    ctx.fillStyle = isStunned ? '#2f3b2f' : '#445544';
     ctx.fillRect(-1.5, -player.height / 2 - 8, 3, 20); // バレルハイライト
 
     // マズルブレーキ（砲口先端の反動抑制器）
-    ctx.fillStyle = '#161b16';
+    ctx.fillStyle = isStunned ? '#0f130f' : '#161b16';
     ctx.fillRect(-4.5, -player.height / 2 - 12, 9, 5);
-    ctx.fillStyle = '#6e7681';
+    ctx.fillStyle = isStunned ? '#485058' : '#6e7681';
     ctx.fillRect(-3, -player.height / 2 - 12, 6, 1.5);
 
     ctx.restore();
+
+    // 頭上・足元ステータスインジケーター（スタン表示 & レーザー残り時間ゲージ）
+    if (isStunned) {
+      ctx.save();
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      const sSec = player.stunTimer.toFixed(1);
+      const stunText = `⚡ STUNNED ${sSec}s ⚡`;
+      ctx.strokeText(stunText, player.x, player.y - player.height / 2 - 16);
+      ctx.fillStyle = (player.stunTimer > 1.5) ? '#ff3366' : '#ffea00';
+      ctx.fillText(stunText, player.x, player.y - player.height / 2 - 16);
+      ctx.restore();
+    } else if (player.shotLevel >= 7 && laserTimer > 0) {
+      // レーザーの有効時間インジケーター（30秒カウントダウンゲージ）
+      ctx.save();
+      const gaugeW = 50;
+      const gaugeH = 4;
+      const gx = player.x - gaugeW / 2;
+      const gy = player.y + player.height / 2 + 8;
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.fillRect(gx, gy, gaugeW, gaugeH);
+
+      const ratio = Math.max(0, Math.min(1, laserTimer / 30.0));
+      ctx.fillStyle = (laserTimer <= 5) ? '#ff4444' : '#00f7ff';
+      ctx.fillRect(gx, gy, gaugeW * ratio, gaugeH);
+
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2.5;
+      const lText = `⚡ LASER ${Math.ceil(laserTimer)}s`;
+      ctx.strokeText(lText, player.x, gy - 2);
+      ctx.fillStyle = (laserTimer <= 5) ? '#ff7777' : '#00f7ff';
+      ctx.fillText(lText, player.x, gy - 2);
+      ctx.restore();
+    }
 
     // 分身（オプション）の描画（最大6個: 1:左, 2:右, 3:左, 4:右, 5:左, 6:右）
     if (player.optionsCount > 0) {
@@ -2858,7 +3183,7 @@
         ctx.fillStyle = '#00f7ff';
         ctx.font = 'bold 9px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`🛡️${box.hp}HIT`, 0, -box.height / 2 - 14);
+        ctx.fillText(`🛡️${Math.max(0, Math.ceil(box.hp))}HIT`, 0, -box.height / 2 - 14);
 
         ctx.restore();
         return;
@@ -2908,38 +3233,48 @@
       ctx.fillStyle = '#39d353';
       ctx.fillRect(-barW / 2, -box.height / 2 - 8, barW * hpRatio, 4);
 
-      // 残りHP数字（何発必要かわかりやすくする）
+      // 残りHP数字（整数表示: 0.0000000000000001等の小数点肥大を防止）
       ctx.fillStyle = 'rgba(255,255,255,0.7)';
       ctx.font = '9px monospace';
-      ctx.fillText(`${box.hp}HIT`, 0, -box.height / 2 - 14);
+      ctx.fillText(`${Math.max(0, Math.ceil(box.hp))}HIT`, 0, -box.height / 2 - 14);
 
       ctx.restore();
     });
   }
 
-  /* --- 敵キャラクター描画（超軽量化版） --- */
+  /* --- 敵キャラクター描画（表示優先順位: 中ボス > 大ボス > 兵士） --- */
   function drawEnemies() {
-    enemies.forEach(e => {
-      // 3. 画面外の描画スキップ: 画面上部(y + radius < 0)や画面下部枠外の敵は完全スキップ
-      if (e.y + e.radius < 0 || e.y - e.radius > GAME_HEIGHT) return;
+    // 表示優先順位: 中ボス（最前面） > 大ボス（中間） > 兵士（最背面）
+    // Canvas2Dは後から描画したものが前面に重なるため、兵士 -> 大ボス -> 中ボスの順で描画
 
-      if (e.type === 'normal') {
-        // 歩く兵士の3コマ連番スプライト（オフスクリーンCanvasキャッシュから高速転写）
-        const frames = enemySprites[e.colorType] || enemySprites.white;
-        const frameIdx = Math.floor(((gameTick + (e.walkOffset || 0)) % 24) / 8);
-        const spr = frames[frameIdx] || frames[0];
-        ctx.drawImage(spr.canvas, Math.round(e.x - spr.halfW), Math.round(e.y - spr.halfH));
-      } else if (e.type === 'midboss') {
-        ctx.save();
-        ctx.translate(e.x, e.y);
-        drawTankBoss(e);
-        ctx.restore();
-      } else if (e.type === 'boss') {
-        ctx.save();
-        ctx.translate(e.x, e.y);
-        drawFortressBoss(e);
-        ctx.restore();
-      }
+    // 1. 兵士（最背面）
+    enemies.forEach(e => {
+      if (e.type !== 'normal') return;
+      if (e.y + e.radius < 0 || e.y - e.radius > GAME_HEIGHT) return;
+      const frames = enemySprites[e.colorType] || enemySprites.white;
+      const frameIdx = Math.floor(((gameTick + (e.walkOffset || 0)) % 24) / 8);
+      const spr = frames[frameIdx] || frames[0];
+      ctx.drawImage(spr.canvas, Math.round(e.x - spr.halfW), Math.round(e.y - spr.halfH));
+    });
+
+    // 2. 大ボス（中間層）
+    enemies.forEach(e => {
+      if (e.type !== 'boss') return;
+      if (e.y + e.radius < 0 || e.y - e.radius > GAME_HEIGHT) return;
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      drawFortressBoss(e);
+      ctx.restore();
+    });
+
+    // 3. 中ボス（最前面）
+    enemies.forEach(e => {
+      if (e.type !== 'midboss') return;
+      if (e.y + e.radius < 0 || e.y - e.radius > GAME_HEIGHT) return;
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      drawTankBoss(e);
+      ctx.restore();
     });
   }
 
@@ -3278,6 +3613,70 @@
     ctx.font = `bold ${Math.max(10, r * 0.28)}px monospace`;
     ctx.textAlign = 'center';
     ctx.fillText(`FORTRESS HP:${Math.ceil(e.hp)}`, 0, -r * 1.85);
+  }
+
+  /* --- 敵弾描画（中ボスの砲弾 & 大ボスのレーザー光線） --- */
+  function drawEnemyBullets() {
+    if (!enemyBullets || enemyBullets.length === 0) return;
+
+    enemyBullets.forEach(eb => {
+      ctx.save();
+      ctx.translate(eb.x, eb.y);
+
+      if (eb.type === 'midboss_shell') {
+        // 中ボス（戦車）の砲弾: オレンジの重徹甲榴弾
+        // 砲弾の軌跡テール
+        ctx.fillStyle = 'rgba(255, 120, 0, 0.45)';
+        ctx.beginPath();
+        ctx.moveTo(-eb.radius * 0.7, 0);
+        ctx.lineTo(eb.radius * 0.7, 0);
+        ctx.lineTo(0, -eb.radius * 2.2);
+        ctx.closePath();
+        ctx.fill();
+
+        // 弾頭本体
+        ctx.fillStyle = '#ff6600';
+        ctx.beginPath();
+        ctx.arc(0, 0, eb.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 高熱火炎コア
+        ctx.fillStyle = '#ffea00';
+        ctx.beginPath();
+        ctx.arc(0, 0, eb.radius * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, eb.radius * 0.28, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (eb.type === 'boss_laser') {
+        // 大ボス（移動城塞）のレーザー光線: 左右15度方向の高速ビーム
+        ctx.rotate(eb.angle || 0);
+
+        const len = eb.length || 44;
+        const halfW = (eb.width || 7) / 2;
+
+        // 外側クリムゾン光条
+        ctx.fillStyle = '#ff1144';
+        ctx.beginPath();
+        ctx.roundRect(-halfW * 1.5, -len / 2, halfW * 3, len, halfW * 1.5);
+        ctx.fill();
+
+        // 内側マゼンタコア
+        ctx.fillStyle = '#ff77aa';
+        ctx.beginPath();
+        ctx.roundRect(-halfW, -len / 2 + 2, halfW * 2, len - 4, halfW);
+        ctx.fill();
+
+        // 中心ホワイトホットライン
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.roundRect(-halfW * 0.4, -len / 2 + 4, halfW * 0.8, len - 8, halfW * 0.4);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
   }
 
   /* --- 弾丸描画 --- */
