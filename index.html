@@ -425,11 +425,11 @@
   <!-- サウンドトグル -->
   <button id="soundToggle" class="sound-toggle">🔊 ON</button>
 
-  <!-- 操作用UIボタン群（プレイヤーライン直下: 左移動 / ボム / 攻撃一時停止 / 右移動） -->
+  <!-- 操作用UIボタン群（プレイヤーライン直下: 左移動 / 攻撃一時停止 / ボム / 右移動） -->
   <div class="ui-controls-bar">
     <button class="control-btn" id="btnLeft" title="左へ移動 [←/A]">◀</button>
-    <button class="control-btn bomb-btn" id="btnBomb" title="ボム投下 [Space/パッドA]">💣</button>
     <button class="control-btn pause-attack-btn" id="btnPauseAttack" title="攻撃一時停止/再開 [Shift/パッドB/タップ]">⏸</button>
+    <button class="control-btn bomb-btn" id="btnBomb" title="ボム投下 [Space/パッドA]">💣</button>
     <button class="control-btn" id="btnRight" title="右へ移動 [→/D]">▶</button>
   </div>
 
@@ -1072,8 +1072,8 @@
   }
 
   bindTouchButton(btnLeft, () => { keys.left = true; targetPlayerX = null; }, () => { keys.left = false; });
-  bindTouchButton(btnBomb, () => { triggerBomb(); }, null);
   bindTouchButton(btnPauseAttack, () => { toggleCeaseFire(); }, null);
+  bindTouchButton(btnBomb, () => { triggerBomb(); }, null);
   bindTouchButton(btnRight, () => { keys.right = true; targetPlayerX = null; }, () => { keys.right = false; });
 
   /* --- ゲームパッド (Gamepad API) 入力管理 --- */
