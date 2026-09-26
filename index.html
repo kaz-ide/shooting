@@ -1231,22 +1231,25 @@
     shootCooldown: 0,
     shootInterval: 12, // 通常フレーム間隔
     // パワーアップ状態
-    shotLevel: 1,      // 1〜5段階（初期1列、2:縦2倍、3:2列、4:3列、5:5方向）
-    optionsCount: 0,   // 0〜6個（1:左, 2:右, 3:左, 4:右, 5:左, 6:右）
+    shotLevel: 1,      // 1〜5段階（初期1列、2:縦2倍、3:2列、4:3列、5:5方向、6:7方向、7:レーザー）
+    optionsCount: 0,   // 通常0〜4個。4個状態で取得すると+3個で計7個(10秒間)
     muzzleFlash: 0,
     stunTimer: 0       // ボス攻撃被弾時のスタンタイマー（秒）
   };
 
-  // オプション配置座標計算ヘルパー（最大6個：1:左1, 2:右1, 3:左2, 4:右2, 5:左3, 6:右3）
+  // オプション配置座標計算ヘルパー
+  // 通常最大4個（1:左1, 2:右1, 3:左2, 4:右2）
+  // 4個所持時に追加取得で+3個（計7個）: 5:左端, 6:右端, 7:自機の前（10秒間限定）
   function getOptionPositions(count) {
     const positions = [];
     const slots = [
-      { dx: -34, dy: -8 },  // 1個目: 左1
-      { dx: 34, dy: -8 },   // 2個目: 右1
-      { dx: -54, dy: 4 },   // 3個目: 左2
-      { dx: 54, dy: 4 },    // 4個目: 右2
-      { dx: -74, dy: 16 },  // 5個目: 左3
-      { dx: 74, dy: 16 }    // 6個目: 右3
+      { dx: -34, dy: -8 },   // 1個目: 左1
+      { dx: 34, dy: -8 },    // 2個目: 右1
+      { dx: -54, dy: 4 },    // 3個目: 左2
+      { dx: 54, dy: 4 },     // 4個目: 右2
+      { dx: -78, dy: 16 },   // 5個目: 左端 (+3追加時)
+      { dx: 78, dy: 16 },    // 6個目: 右端 (+3追加時)
+      { dx: 0, dy: -46 }     // 7個目: 自機の前 (+3追加時)
     ];
     for (let i = 0; i < Math.min(count, slots.length); i++) {
       positions.push({
@@ -1268,7 +1271,8 @@
   let hitEffects = [];  // パーティクル
   let popupTexts = [];  // 残りスタミナ等の数値ポップアップ
   let zakoExplosions = []; // ザコ敵撃破時の超軽量2コマ連番爆発スプライト
-  let laserTimer = 0;     // レーザーの有効時間（30秒カウントダウン）
+  let laserTimer = 0;        // レーザーの有効時間（初期10秒、追加取得で+10秒）
+  let optionBonusTimer = 0;  // オプション4個時の+3個(計7個)ボーナス有効時間（10秒、追加取得で+10秒）
 
   // ボム用フラッシュ（黒ボム: 弱め白 / 赤ボム: 強烈赤フラッシュ）
   let bombFlashAlpha = 0;
@@ -1496,6 +1500,7 @@
     player.shootInterval = 12;
     player.stunTimer = 0;
     laserTimer = 0;
+    optionBonusTimer = 0;
     bullets = [];
     enemyBullets = [];
     enemies = [];
@@ -1993,7 +1998,7 @@
     // HUD更新（1秒ごとまたはフレーム）
     updateHUD();
 
-    // レーザーの有効時間管理（仕様: 30秒のみ有効、時間経過で1つ前のLv.6に戻る）
+    // レーザーの有効時間管理（仕様: 10秒のみ有効、時間経過で1つ前のLv.6に戻る）
     if (player.shotLevel >= 7) {
       laserTimer -= delta;
       if (laserTimer <= 0) {
@@ -2002,6 +2007,16 @@
         activeLaser = null;
         createPopupText(player.x, player.y - 45, '⚠️ LASER TIME EXPIRED -> Lv.6', '#ff9900');
         updateHUD();
+      }
+    }
+
+    // オプション4個時の+3個(計7個)ボーナス有効時間管理（仕様: 10秒経過したら4個に戻る）
+    if (optionBonusTimer > 0) {
+      optionBonusTimer -= delta;
+      if (optionBonusTimer <= 0) {
+        optionBonusTimer = 0;
+        player.optionsCount = 4; // 10秒経過したら4個に戻る
+        createPopupText(player.x, player.y - 45, '⚠️ OPTION BOOST ENDED -> 4基', '#ff9900');
       }
     }
 
@@ -2065,7 +2080,7 @@
     }
     if (player.muzzleFlash > 0) player.muzzleFlash--;
 
-    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中は照射不可、手前から最大20体貫通で遮断）
+    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中は照射不可、手前から最大30体貫通で遮断）
     if (player.shotLevel >= 7 && !isStunned) {
       if (laserCooldown > 0) laserCooldown--;
       if (laserCooldown <= 0) {
@@ -2091,8 +2106,8 @@
                  e.y <= startY + e.radius;
         }).sort((a, b) => b.y - a.y);
 
-        // 仕様: 最大20体まで貫通。20体到達でレーザー遮断
-        const maxPierce = 20;
+        // 仕様: 貫通力を1.5倍に強化（20体 → 30体まで貫通。30体到達でレーザー遮断）
+        const maxPierce = 30;
         const hitCount = Math.min(inLineEnemies.length, maxPierce);
 
         for (let idx = 0; idx < hitCount; idx++) {
@@ -2124,7 +2139,7 @@
             else e.colorType = 'white';
           }
 
-          // 20体目に到達したら、レーザーの先端をその敵の地点で遮断
+          // 30体目に到達したら、レーザーの先端をその敵の地点で遮断
           if (idx === maxPierce - 1) {
             activeLaser.length = Math.max(15, startY - e.y);
           }
@@ -2225,8 +2240,8 @@
       b.x += b.vx;
       b.y += b.vy;
 
-      // 画面上端（y < -20）または道路壁外に出たら消滅
-      if (b.y < -20 || b.x < ROAD.leftWall - 20 || b.x > ROAD.rightWall + 20) {
+      // 画面上端（y < -20）または画面外に出たら消滅（両端オプション弾の即消滅を防止）
+      if (b.y < -20 || b.x < -40 || b.x > GAME_WIDTH + 40) {
         bullets.splice(i, 1);
       }
     }
@@ -2297,7 +2312,7 @@
           if (player.shotLevel < maxAllowedLvl) {
             player.shotLevel++;
             if (player.shotLevel >= 7) {
-              laserTimer = 30.0; // レーザー有効時間30秒
+              laserTimer = 10.0; // レーザー有効時間10秒 (30秒 -> 10秒)
             }
             const labels = [
               '',
@@ -2307,14 +2322,14 @@
               '3-WAY',
               '5-WAY SPREAD',
               '7-WAY MEGA SPREAD',
-              'HYPER LASER BEAM (Lv.7 30s)'
+              'HYPER LASER BEAM (Lv.7 10s)'
             ];
             createPopupText(player.x, player.y - 45, `SHOT Lv.${player.shotLevel}: ${labels[player.shotLevel]}!`, '#ffea00');
           } else {
             if (player.shotLevel >= 7) {
-              // レーザー発動中にパワーアップを獲得したら30秒に戻る（+30秒ではない）
-              laserTimer = 30.0;
-              createPopupText(player.x, player.y - 45, '⚡ LASER RECHARGED: 30s! ⚡', '#00f7ff');
+              // 10秒以内にもう１個取ったら+10秒
+              laserTimer += 10.0;
+              createPopupText(player.x, player.y - 45, `⚡ LASER EXTENDED +10s! (${Math.ceil(laserTimer)}s) ⚡`, '#00f7ff');
               score += 300;
             } else {
               score += 400;
@@ -2326,13 +2341,24 @@
             }
           }
         } else if (box.type === 'option') {
-          if (player.optionsCount < 6) {
+          if (player.optionsCount < 4) {
             player.optionsCount++;
             const sideLabel = (player.optionsCount % 2 === 1) ? 'LEFT' : 'RIGHT';
-            createPopupText(player.x, player.y - 45, `OPTION +1 (${sideLabel}) [${player.optionsCount}/6]!`, '#00ffff');
+            const maxLabel = (player.optionsCount === 4) ? ' MAX' : '';
+            createPopupText(player.x, player.y - 45, `OPTION +1 (${sideLabel}) [${player.optionsCount}/4]${maxLabel}!`, '#00ffff');
+          } else if (player.optionsCount === 4 && optionBonusTimer <= 0) {
+            // オプション４個状態でのオプション取得したら、＋3個追加（左端、右端、自機の前）
+            // その代わり10秒経過したら4個に戻る
+            player.optionsCount = 7;
+            optionBonusTimer = 10.0;
+            createPopupText(player.x, player.y - 45, '⚡ OPTION BOOST! +3基追加 (計7基/10秒) ⚡', '#ffcc00');
+            score += 400;
           } else {
-            score += 300;
-            createPopupText(player.x, player.y - 45, 'OPTION MAX! +300pts', '#00ffff');
+            // 10秒以内にもう１個取ったら+10秒
+            player.optionsCount = 7;
+            optionBonusTimer += 10.0;
+            createPopupText(player.x, player.y - 45, `⚡ OPTION BOOST +10s! (${Math.ceil(optionBonusTimer)}s) ⚡`, '#ffcc00');
+            score += 500;
           }
         } else if (box.type === 'bomb_black' || box.type === 'bomb_red') {
           // ボム補充アイテム (黒ボム / 赤ボム: 満タン時は最古破棄)
@@ -3022,7 +3048,7 @@
 
     ctx.restore();
 
-    // 頭上・足元ステータスインジケーター（スタン表示 & レーザー残り時間ゲージ）
+    // 頭上ステータスインジケーター（スタン表示）
     if (isStunned) {
       ctx.save();
       ctx.font = 'bold 10px monospace';
@@ -3035,19 +3061,24 @@
       ctx.fillStyle = (player.stunTimer > 1.5) ? '#ff3366' : '#ffea00';
       ctx.fillText(stunText, player.x, player.y - player.height / 2 - 16);
       ctx.restore();
-    } else if (player.shotLevel >= 7 && laserTimer > 0) {
-      // レーザーの有効時間インジケーター（30秒カウントダウンゲージ）
+    }
+
+    // 足元ステータスインジケーター（レーザー残り時間 & オプション7基残り時間）
+    let gaugeOffsetY = player.y + player.height / 2 + 8;
+
+    if (player.shotLevel >= 7 && laserTimer > 0) {
+      // レーザーの有効時間インジケーター（10秒カウントダウンゲージ、延長対応）
       ctx.save();
-      const gaugeW = 50;
+      const gaugeW = 52;
       const gaugeH = 4;
       const gx = player.x - gaugeW / 2;
-      const gy = player.y + player.height / 2 + 8;
+      const gy = gaugeOffsetY;
 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
       ctx.fillRect(gx, gy, gaugeW, gaugeH);
 
-      const ratio = Math.max(0, Math.min(1, laserTimer / 30.0));
-      ctx.fillStyle = (laserTimer <= 5) ? '#ff4444' : '#00f7ff';
+      const ratio = Math.max(0, Math.min(1, laserTimer / 10.0));
+      ctx.fillStyle = (laserTimer <= 3) ? '#ff4444' : '#00f7ff';
       ctx.fillRect(gx, gy, gaugeW * ratio, gaugeH);
 
       ctx.font = 'bold 9px monospace';
@@ -3056,12 +3087,40 @@
       ctx.lineWidth = 2.5;
       const lText = `⚡ LASER ${Math.ceil(laserTimer)}s`;
       ctx.strokeText(lText, player.x, gy - 2);
-      ctx.fillStyle = (laserTimer <= 5) ? '#ff7777' : '#00f7ff';
+      ctx.fillStyle = (laserTimer <= 3) ? '#ff7777' : '#00f7ff';
       ctx.fillText(lText, player.x, gy - 2);
+      ctx.restore();
+
+      gaugeOffsetY += 14;
+    }
+
+    if (optionBonusTimer > 0) {
+      // オプション7基ブースト残り時間インジケーター（10秒カウントダウンゲージ、延長対応）
+      ctx.save();
+      const gaugeW = 52;
+      const gaugeH = 4;
+      const gx = player.x - gaugeW / 2;
+      const gy = gaugeOffsetY;
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.fillRect(gx, gy, gaugeW, gaugeH);
+
+      const ratio = Math.max(0, Math.min(1, optionBonusTimer / 10.0));
+      ctx.fillStyle = (optionBonusTimer <= 3) ? '#ff4444' : '#ffcc00';
+      ctx.fillRect(gx, gy, gaugeW * ratio, gaugeH);
+
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2.5;
+      const oText = `⚡ OPTION 7基 ${Math.ceil(optionBonusTimer)}s`;
+      ctx.strokeText(oText, player.x, gy - 2);
+      ctx.fillStyle = (optionBonusTimer <= 3) ? '#ff9999' : '#ffea00';
+      ctx.fillText(oText, player.x, gy - 2);
       ctx.restore();
     }
 
-    // 分身（オプション）の描画（最大6個: 1:左, 2:右, 3:左, 4:右, 5:左, 6:右）
+    // 分身（オプション）の描画（通常最大4個、ボーナス時7個）
     if (player.optionsCount > 0) {
       const optPositions = getOptionPositions(player.optionsCount);
       optPositions.forEach(op => {
