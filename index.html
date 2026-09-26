@@ -160,6 +160,25 @@
       box-shadow: 0 0 20px rgba(255, 60, 60, 0.9);
     }
 
+    /* 攻撃一時停止ボタン (ボムと右移動の中間) */
+    .pause-attack-btn {
+      width: 58px;
+      height: 52px;
+      border-color: rgba(255, 204, 0, 0.55);
+      background: rgba(35, 30, 15, 0.85);
+      color: #ffd700;
+      font-size: 20px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 0 8px rgba(255, 215, 0, 0.2);
+    }
+
+    .pause-attack-btn:active, .pause-attack-btn.active, .pause-attack-btn.pausing {
+      background: rgba(255, 204, 0, 0.45);
+      border-color: #ffe600;
+      box-shadow: 0 0 18px rgba(255, 215, 0, 0.9);
+      color: #ffffff;
+      transform: scale(0.93);
+    }
+
     /* 最下部 防衛ライン装飾 (Canvas上でも判定・描画) */
     .defense-line-indicator {
       position: absolute;
@@ -406,11 +425,12 @@
   <!-- サウンドトグル -->
   <button id="soundToggle" class="sound-toggle">🔊 ON</button>
 
-  <!-- 操作用UIボタン群（プレイヤーライン直下） -->
+  <!-- 操作用UIボタン群（プレイヤーライン直下: 左移動 / ボム / 攻撃一時停止 / 右移動） -->
   <div class="ui-controls-bar">
-    <button class="control-btn" id="btnLeft" title="左へ移動">◀</button>
-    <button class="control-btn bomb-btn" id="btnBomb" title="ボム投下">💣</button>
-    <button class="control-btn" id="btnRight" title="右へ移動">▶</button>
+    <button class="control-btn" id="btnLeft" title="左へ移動 [←/A]">◀</button>
+    <button class="control-btn bomb-btn" id="btnBomb" title="ボム投下 [Space/パッドA]">💣</button>
+    <button class="control-btn pause-attack-btn" id="btnPauseAttack" title="攻撃一時停止/再開 [Shift/パッドB/タップ]">⏸</button>
+    <button class="control-btn" id="btnRight" title="右へ移動 [→/D]">▶</button>
   </div>
 
   <!-- 最下部 赤い防衛ライン発光バー -->
@@ -441,7 +461,8 @@
 
     <div class="rules-card">
       ・<span class="danger-text">防衛敗北:</span> 敵が1体でも最下部城門防壁ラインを越えたら即GAME OVER<br>
-      ・<strong>操作:</strong> [←][→]/スティックで移動、自動射撃（横並び弾は1列ずつ消費・奥へ貫通）<br>
+      ・<strong>操作:</strong> [←][→]/スティックで移動、自動射撃<br>
+      ・<strong>攻撃一時停止 [Shift/パッドB(○)/⏸]:</strong> 1秒間攻撃停止(再押しで即再開)。アイテム誤取得防止<br>
       ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
       &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体3ダメ/ザコ全滅)</span> ※ボス撃破で自動誘爆<br>
       ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化) / <span style="color:#00f7ff">O</span>(オプション) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/中ボス級耐久・破壊で赤ボム+1000点)<br>
@@ -793,6 +814,7 @@
   const btnLeft = document.getElementById('btnLeft');
   const btnRight = document.getElementById('btnRight');
   const btnBomb = document.getElementById('btnBomb');
+  const btnPauseAttack = document.getElementById('btnPauseAttack');
   const timeBtns = document.querySelectorAll('.btn-time');
   const densityBtns = document.querySelectorAll('.btn-density');
 
@@ -880,9 +902,35 @@
   let score = 0;
   let bombs = ['black', 'black', 'black']; // ボムキュー（最大3個・先頭から使用・満タン時最古破棄）
   let screenShake = 0;
+  let ceaseFireTimer = 0; // 攻撃一時停止タイマー（秒: 1秒で自動再開、再押しで即再開）
+
+  /* --- 攻撃一時停止（アイテム誤取得防止機能）制御 --- */
+  function updateCeaseFireUI() {
+    if (btnPauseAttack) {
+      btnPauseAttack.classList.toggle('pausing', ceaseFireTimer > 0);
+      btnPauseAttack.innerText = (ceaseFireTimer > 0) ? '▶' : '⏸';
+      btnPauseAttack.title = (ceaseFireTimer > 0) ? '攻撃再開 [Shift/パッドB]' : '攻撃一時停止 [Shift/パッドB]';
+    }
+  }
+
+  function toggleCeaseFire() {
+    if (gameState !== 'PLAYING') return;
+    sfx.init();
+    if (ceaseFireTimer > 0) {
+      // 停止中にもう一度キー/ボタンを押すと攻撃再開
+      ceaseFireTimer = 0;
+      createPopupText(player.x, player.y - 45, '▶ 攻撃再開', '#00ffcc');
+    } else {
+      // 押すと攻撃を一時停止（放置しても1秒で攻撃再開）
+      ceaseFireTimer = 1.0;
+      activeLaser = null; // レーザー照射中なら即座に遮断
+      createPopupText(player.x, player.y - 45, '⏸ 攻撃一時停止 (1秒)', '#ffcc00');
+    }
+    updateCeaseFireUI();
+  }
 
   /* --- 入力管理 --- */
-  const keys = { left: false, right: false };
+  const keys = { left: false, right: false, shift: false };
   let targetPlayerX = null; // マウス/タップ追従用
 
   window.addEventListener('keydown', (e) => {
@@ -960,12 +1008,22 @@
         triggerBomb();
         e.preventDefault();
       }
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') {
+        if (!keys.shift) {
+          keys.shift = true;
+          toggleCeaseFire();
+        }
+        e.preventDefault();
+      }
     }
   });
 
   window.addEventListener('keyup', (e) => {
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
     if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') {
+      keys.shift = false;
+    }
   });
 
   // キャンバスクリック / タップ移動
@@ -994,6 +1052,7 @@
 
   // 画面下ボタン
   function bindTouchButton(btn, onDown, onUp) {
+    if (!btn) return;
     const start = (e) => {
       e.preventDefault();
       sfx.init();
@@ -1013,13 +1072,15 @@
   }
 
   bindTouchButton(btnLeft, () => { keys.left = true; targetPlayerX = null; }, () => { keys.left = false; });
-  bindTouchButton(btnRight, () => { keys.right = true; targetPlayerX = null; }, () => { keys.right = false; });
   bindTouchButton(btnBomb, () => { triggerBomb(); }, null);
+  bindTouchButton(btnPauseAttack, () => { toggleCeaseFire(); }, null);
+  bindTouchButton(btnRight, () => { keys.right = true; targetPlayerX = null; }, () => { keys.right = false; });
 
   /* --- ゲームパッド (Gamepad API) 入力管理 --- */
   let gpMoveDir = 0;
   const gpState = {
     bombPrev: false,
+    pauseAttackPrev: false,
     startPrev: false,
     upPrev: false,
     downPrev: false,
@@ -1062,6 +1123,7 @@
     if (!gp) {
       gpMoveDir = 0;
       gpState.bombPrev = false;
+      gpState.pauseAttackPrev = false;
       gpState.startPrev = false;
       gpState.upPrev = false;
       gpState.downPrev = false;
@@ -1093,10 +1155,13 @@
     // 2. ボム: ボタン0 (A / ×) または ボタン2 (X / □)
     const isBombBtn = isGpButtonPressed(gp, 0) || isGpButtonPressed(gp, 2);
 
+    // 2.5 攻撃一時停止/再開: ボタン1 (B / ○ / ボムAボタンの右側) または ボタン5 (RB / R1)
+    const isPauseAttackBtn = isGpButtonPressed(gp, 1) || isGpButtonPressed(gp, 5);
+
     // 3. 決定/即スタート: ボタン0 (A / ×) または スタートボタン (ボタン9)
     const isConfirmBtn = isGpButtonPressed(gp, 0) || isGpButtonPressed(gp, 9);
 
-    if (isBombBtn || isConfirmBtn || isLeft || isRight || isUp || isDown) {
+    if (isBombBtn || isPauseAttackBtn || isConfirmBtn || isLeft || isRight || isUp || isDown) {
       sfx.init();
     }
 
@@ -1110,6 +1175,9 @@
       // コントローラー操作時は連射暴発を防ぐため、1回押して離すまで1回のみ発動判定
       if (isBombBtn && !gpState.bombPrev) {
         triggerBomb();
+      }
+      if (isPauseAttackBtn && !gpState.pauseAttackPrev) {
+        toggleCeaseFire();
       }
     }
 
@@ -1171,6 +1239,7 @@
 
     // エッジトリガー更新 (押下遷移を保持)
     gpState.bombPrev = isBombBtn;
+    gpState.pauseAttackPrev = isPauseAttackBtn;
     gpState.startPrev = isConfirmBtn;
     gpState.upPrev = isUp;
     gpState.downPrev = isDown;
@@ -1523,6 +1592,8 @@
     bombFlashDecay = 0.08;
     activeLaser = null;
     laserCooldown = 0;
+    ceaseFireTimer = 0;
+    updateCeaseFireUI();
     updateHUD();
   }
 
@@ -2020,12 +2091,25 @@
       }
     }
 
+    // 攻撃一時停止タイマー管理（仕様: 放置しても1秒で攻撃再開）
+    if (ceaseFireTimer > 0) {
+      ceaseFireTimer -= delta;
+      if (ceaseFireTimer <= 0) {
+        ceaseFireTimer = 0;
+        createPopupText(player.x, player.y - 45, '▶ 攻撃自動再開', '#00ffcc');
+        updateCeaseFireUI();
+      }
+    }
+
     // 画面揺れ減衰
     if (screenShake > 0) screenShake *= 0.88;
     if (screenShake < 0.2) screenShake = 0;
 
     // 道路スクロール
     ROAD.scrollOffset = (ROAD.scrollOffset + ROAD.speed) % 80;
+
+    // 攻撃一時停止フラグ
+    const isCeaseFire = (ceaseFireTimer > 0);
 
     // プレイヤー行動可否判定（ボス攻撃被弾時のスタン状態：移動＆攻撃不可）
     const isStunned = (player.stunTimer > 0);
@@ -2070,8 +2154,8 @@
     if (player.x < ROAD.leftWall + pMargin) player.x = ROAD.leftWall + pMargin;
     if (player.x > ROAD.rightWall - pMargin) player.x = ROAD.rightWall - pMargin;
 
-    // 自動射撃（自機: スタン中は射撃不可）
-    if (!isStunned) {
+    // 自動射撃（自機: スタン中または攻撃一時停止中は射撃不可）
+    if (!isStunned && !isCeaseFire) {
       player.shootCooldown--;
       if (player.shootCooldown <= 0) {
         fireBullets();
@@ -2080,8 +2164,8 @@
     }
     if (player.muzzleFlash > 0) player.muzzleFlash--;
 
-    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中は照射不可、手前から最大30体貫通で遮断）
-    if (player.shotLevel >= 7 && !isStunned) {
+    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中または攻撃一時停止中は照射不可、手前から最大30体貫通で遮断）
+    if (player.shotLevel >= 7 && !isStunned && !isCeaseFire) {
       if (laserCooldown > 0) laserCooldown--;
       if (laserCooldown <= 0) {
         // 0.2秒（12フレーム）の間を開けて発射
@@ -2166,18 +2250,22 @@
       }
     }
 
-    // レーザー照射中の追従と寿命管理
+    // レーザー照射中の追従と寿命管理（攻撃一時停止時は即消滅）
     if (activeLaser) {
-      activeLaser.life--;
-      activeLaser.x = player.x;
-      activeLaser.startY = player.y - player.height / 2;
-      if (activeLaser.life <= 0) {
+      if (isCeaseFire) {
         activeLaser = null;
+      } else {
+        activeLaser.life--;
+        activeLaser.x = player.x;
+        activeLaser.startY = player.y - player.height / 2;
+        if (activeLaser.life <= 0) {
+          activeLaser = null;
+        }
       }
     }
 
-    // オプション独立射撃（仕様: 自機の弾レベル - 1、最大4段階目まで(3列)、スタン中は射撃不可）
-    if (player.optionsCount > 0 && !isStunned) {
+    // オプション独立射撃（仕様: 自機の弾レベル - 1、最大4段階目まで(3列)、スタン中または攻撃一時停止中は射撃不可）
+    if (player.optionsCount > 0 && !isStunned && !isCeaseFire) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
         const optLevel = Math.min(4, Math.max(1, (player.shotLevel || 1) - 1));
@@ -3048,7 +3136,7 @@
 
     ctx.restore();
 
-    // 頭上ステータスインジケーター（スタン表示）
+    // 頭上ステータスインジケーター（スタン表示 & 攻撃一時停止表示）
     if (isStunned) {
       ctx.save();
       ctx.font = 'bold 10px monospace';
@@ -3060,6 +3148,18 @@
       ctx.strokeText(stunText, player.x, player.y - player.height / 2 - 16);
       ctx.fillStyle = (player.stunTimer > 1.5) ? '#ff3366' : '#ffea00';
       ctx.fillText(stunText, player.x, player.y - player.height / 2 - 16);
+      ctx.restore();
+    } else if (ceaseFireTimer > 0) {
+      ctx.save();
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      const cSec = ceaseFireTimer.toFixed(1);
+      const pauseText = `⏸ 射撃停止中 ${cSec}s`;
+      ctx.strokeText(pauseText, player.x, player.y - player.height / 2 - 16);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(pauseText, player.x, player.y - player.height / 2 - 16);
       ctx.restore();
     }
 
