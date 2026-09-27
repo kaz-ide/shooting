@@ -461,11 +461,11 @@
 
     <div class="rules-card">
       ・<span class="danger-text">防衛敗北:</span> 敵が1体でも最下部城門防壁ラインを越えたら即GAME OVER<br>
-      ・<strong>操作:</strong> [←][→]/スティックで移動、自動射撃<br>
+      ・<strong>自機:</strong> 初期状態からLv.2高速連射装備！[←][→]/スティックで移動、自動射撃<br>
       ・<strong>攻撃一時停止 [Shift/パッドB(○)/⏸]:</strong> 1秒間攻撃停止(再押しで即再開)。アイテム誤取得防止<br>
       ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
-      &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体3ダメ/ザコ全滅)</span> ※ボス撃破で自動誘爆<br>
-      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化) / <span style="color:#00f7ff">O</span>(オプション) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/中ボス級耐久・破壊で赤ボム+1000点)<br>
+      &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体2ダメ/弾2発分)</span> ※ボス撃破で自動誘爆<br>
+      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション/4基時取得で超輝く特殊3基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/中ボス級耐久・破壊で赤ボム+1000点)<br>
       ・<strong>メニュー/パッド:</strong> [十字キー/矢印] 選択、[Enter/START/A] 即スタート
     </div>
   </div>
@@ -1300,7 +1300,7 @@
     shootCooldown: 0,
     shootInterval: 12, // 通常フレーム間隔
     // パワーアップ状態
-    shotLevel: 1,      // 1〜5段階（初期1列、2:縦2倍、3:2列、4:3列、5:5方向、6:7方向、7:レーザー）
+    shotLevel: 2,      // 初期状態を2段階目（VERTICAL 2x）からスタート
     optionsCount: 0,   // 通常0〜4個。4個状態で取得すると+3個で計7個(10秒間)
     muzzleFlash: 0,
     stunTimer: 0       // ボス攻撃被弾時のスタンタイマー（秒）
@@ -1564,7 +1564,7 @@
     bombs = ['black', 'black', 'black']; // 初期所持: 黒ボム3個
     screenShake = 0;
     player.x = GAME_WIDTH / 2;
-    player.shotLevel = 1;
+    player.shotLevel = 2; // 初期状態を2段階目（VERTICAL 2x）からスタート
     player.optionsCount = 0;
     player.shootInterval = 12;
     player.stunTimer = 0;
@@ -1618,7 +1618,7 @@
       bombFlashDecay = 0.06;
     }
 
-    const damage = isRed ? 3 : 1;
+    const damage = isRed ? 2 : 1; // 赤ボムは弾2発分(2ダメ)、黒ボムは弾1発分(1ダメ)
 
     enemies.forEach(e => {
       if (e.type === 'normal') {
@@ -1693,7 +1693,7 @@
     if (!bombs || bombs.length === 0) return;
     const bombType = bombs.shift(); // 先頭のボム（最古）を取り出して使用
     updateHUD();
-    triggerBombEffect(bombType, bombType === 'red' ? '💣 赤ボム発動！ (全体3ダメ/ザコ全滅)' : '💣 黒ボム発動！ (全体1ダメ)');
+    triggerBombEffect(bombType, bombType === 'red' ? '💣 赤ボム発動！ (全体2ダメ)' : '💣 黒ボム発動！ (全体1ダメ)');
   }
 
   function formatTime(sec) {
@@ -1711,7 +1711,7 @@
       let bHtml = '';
       bombs.forEach((b, idx) => {
         if (b === 'red') {
-          bHtml += `<span style="color:#ff3333;text-shadow:0 0 8px #ff0000;margin-right:3px;" title="${idx+1}番目: 赤ボム (全体3ダメ)">💣</span>`;
+          bHtml += `<span style="color:#ff3333;text-shadow:0 0 8px #ff0000;margin-right:3px;" title="${idx+1}番目: 赤ボム (全体2ダメ)">💣</span>`;
         } else {
           bHtml += `<span style="color:#e6edf3;text-shadow:0 0 6px #ffffff;margin-right:3px;" title="${idx+1}番目: 黒ボム (全体1ダメ)">💣</span>`;
         }
@@ -2271,7 +2271,9 @@
         const optLevel = Math.min(4, Math.max(1, (player.shotLevel || 1) - 1));
         const optPositions = getOptionPositions(player.optionsCount);
 
-        optPositions.forEach(op => {
+        optPositions.forEach((op, idx) => {
+          const isSpecial = (idx >= 4);
+          const bColor = isSpecial ? '#00f7ff' : '#ff9900';
           if (optLevel < 3) {
             // 1段階目・2段階目: 1列直進 (optLevel 2以上で縦2倍密度)
             bullets.push({
@@ -2282,8 +2284,9 @@
               vy: -13,
               damage: 0.7, // 自機より1段階下の火力
               isPower: optLevel >= 2,
-              color: '#ff9900',
-              fromOption: true
+              color: bColor,
+              fromOption: true,
+              fromSpecialOption: isSpecial
             });
           } else if (optLevel === 3) {
             // 3段階目: 弾を2列に
@@ -2296,8 +2299,9 @@
                 vy: -13,
                 damage: 0.7,
                 isPower: true,
-                color: '#ff9900',
-                fromOption: true
+                color: bColor,
+                fromOption: true,
+                fromSpecialOption: isSpecial
               });
             });
           } else {
@@ -2311,8 +2315,9 @@
                 vy: -13,
                 damage: 0.7,
                 isPower: true,
-                color: '#ff9900',
-                fromOption: true
+                color: bColor,
+                fromOption: true,
+                fromSpecialOption: isSpecial
               });
             });
           }
@@ -2461,7 +2466,7 @@
           bombs.push(newBomb);
           updateHUD();
           if (isRed) {
-            createPopupText(player.x, player.y - 45, discarded ? '赤ボム獲得! (先頭破棄)' : '赤ボム獲得! [全体3ダメ]', '#ff4444');
+            createPopupText(player.x, player.y - 45, discarded ? '赤ボム獲得! (先頭破棄)' : '赤ボム獲得! [全体2ダメ]', '#ff4444');
           } else {
             createPopupText(player.x, player.y - 45, discarded ? '黒ボム獲得! (先頭破棄)' : '黒ボム獲得! [全体1ダメ]', '#ffffff');
           }
@@ -2615,8 +2620,8 @@
             screenShake = 26;
             createExplosion(e.x, e.y, 70, '#ff3300');
             createPopupText(e.x, e.y, '+2000 移動城塞撃破！', '#ff3333');
-            // 大ボス爆破時: 赤ボム(画面全体に弾3発分)と同じ効果を誘爆発動！
-            triggerBombEffect('red', '💥 移動城塞爆破：赤ボム全域誘爆(ザコ全滅)！');
+            // 大ボス爆破時: 赤ボム(画面全体に弾2発分)と同じ効果を誘爆発動！
+            triggerBombEffect('red', '💥 移動城塞爆破：赤ボム全域誘爆(全体2ダメ)！');
           }
         }
         enemies.splice(i, 1);
@@ -3223,8 +3228,12 @@
     // 分身（オプション）の描画（通常最大4個、ボーナス時7個）
     if (player.optionsCount > 0) {
       const optPositions = getOptionPositions(player.optionsCount);
-      optPositions.forEach(op => {
-        drawGradiusOption(op.x, op.y);
+      optPositions.forEach((op, idx) => {
+        if (idx >= 4) {
+          drawSpecialBurstOption(op.x, op.y);
+        } else {
+          drawGradiusOption(op.x, op.y);
+        }
       });
     }
   }
@@ -3264,6 +3273,89 @@
     ctx.beginPath();
     ctx.ellipse(0, 0, 16, 4 + Math.cos(time) * 2, Math.PI / 4, 0, Math.PI * 2);
     ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /* スペシャルオプション（7基モード時の3基: 超高輝度フォトン・プラズマオーブ） */
+  function drawSpecialBurstOption(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    const now = performance.now();
+    const time = now * 0.006;
+    const pulse = 1.0 + Math.sin(time * 2.5) * 0.18;
+
+    // 1. 強烈な外郭グロー（エレクトリックシアン＆神聖ゴールド）
+    ctx.shadowColor = '#00f7ff';
+    ctx.shadowBlur = 20;
+
+    // 2. 外郭パルスオーラ（放射状プラズマ球）
+    const gradHalo = ctx.createRadialGradient(0, 0, 2, 0, 0, 19 * pulse);
+    gradHalo.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    gradHalo.addColorStop(0.3, 'rgba(0, 247, 255, 0.8)');
+    gradHalo.addColorStop(0.65, 'rgba(0, 170, 255, 0.35)');
+    gradHalo.addColorStop(1, 'rgba(0, 220, 255, 0)');
+    ctx.fillStyle = gradHalo;
+    ctx.beginPath();
+    ctx.arc(0, 0, 19 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 3. 高速回転する4尖ダイヤモンド・レンズフレア（キラキラ感）
+    ctx.save();
+    ctx.rotate(time * 1.6);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    for (let i = 0; i < 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-16 * pulse, 0);
+      ctx.lineTo(0, -2.5);
+      ctx.lineTo(16 * pulse, 0);
+      ctx.lineTo(0, 2.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.rotate(Math.PI / 2);
+    }
+    ctx.restore();
+
+    // 4. 二重の逆回転量子リング（立体交差）
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = '#00f7ff';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 15, 6, time * 2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffe600';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 14, 5, -time * 2.2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 5. 超高輝度プラズマコア（外側シアン、中間ゴールド、中心純白）
+    ctx.fillStyle = '#00d0ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 7.5 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#fffae0';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 6. 周囲を公転するフォトン・スパークル（4つの光粒子）
+    for (let k = 0; k < 4; k++) {
+      const angle = time * 3 + (k * Math.PI / 2);
+      const dist = 13 + Math.sin(time * 4 + k) * 3;
+      const px = Math.cos(angle) * dist;
+      const py = Math.sin(angle) * dist;
+      ctx.fillStyle = (k % 2 === 0) ? '#ffffff' : '#00ffff';
+      ctx.beginPath();
+      ctx.arc(px, py, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     ctx.restore();
   }
@@ -3844,7 +3936,15 @@
       ctx.save();
       ctx.translate(b.x, b.y);
 
-      if (b.fromOption) {
+      if (b.fromSpecialOption) {
+        // スペシャルオプション弾: 眩く輝くシアン＆白のフォトン光弾
+        ctx.shadowColor = '#00f7ff';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#00f7ff';
+        ctx.fillRect(-2, -9, 4, 18);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-1, -7, 2, 14); // 中央高輝度芯
+      } else if (b.fromOption) {
         // オプション弾: オレンジ細弾
         ctx.fillStyle = '#ff9900';
         ctx.fillRect(-1.5, -6, 3, 12);
