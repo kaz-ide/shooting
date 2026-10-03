@@ -465,7 +465,8 @@
       ・<strong>攻撃一時停止 [Shift/パッドB(○)/⏸]:</strong> 1秒間攻撃停止(再押しで即再開)。アイテム誤取得防止<br>
       ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
       &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体2ダメ/弾2発分)</span> ※ボス撃破で自動誘爆<br>
-      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション/4基時取得で超輝く特殊3基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/中ボス級耐久・破壊で赤ボム+1000点)<br>
+      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション最大3列連射/4基時取得で特殊3基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/破壊で赤ボム+1000点)<br>
+      ・<strong>ボス被弾:</strong> 中ボス砲弾＝弾orオプション1段階ダウン(ランダム) / 大ボスレーザー＝弾＆オプション両方1段階ダウン<br>
       ・<strong>メニュー/パッド:</strong> [十字キー/矢印] 選択、[Enter/START/A] 即スタート
     </div>
   </div>
@@ -860,7 +861,8 @@
       growthSec: 18,
       baseInterval: 90,
       minInterval: 25,
-      intervalDecay: 0.9
+      intervalDecay: 0.9,
+      maxEnemies: 350
     },
     hard: { // NORMAL: DEVILの70%、固さ1(白のみ)
       name: 'NORMAL',
@@ -871,18 +873,20 @@
       growthSec: 18,
       baseInterval: 90,
       minInterval: 25,
-      intervalDecay: 0.9
+      intervalDecay: 0.9,
+      maxEnemies: 450
     },
-    expert: { // HARD: DEVILの80%、固さ1と2のみ
+    expert: { // HARD: 固さ1と2のみ、最大敵数を500体から100体増加して600体に強化
       name: 'HARD',
-      ratio: 0.80,
-      perRow: 19,
+      ratio: 0.95,
+      perRow: 21,
       baseRows: 2,
-      maxRows: 5,
+      maxRows: 6,
       growthSec: 18,
-      baseInterval: 90,
-      minInterval: 25,
-      intervalDecay: 0.9
+      baseInterval: 80,
+      minInterval: 22,
+      intervalDecay: 0.95,
+      maxEnemies: 600
     },
     mega: { // DEVIL: 今と同じ (100% / 白・灰・黒)
       name: 'DEVIL',
@@ -893,7 +897,8 @@
       growthSec: 18,
       baseInterval: 90,
       minInterval: 25,
-      intervalDecay: 0.9
+      intervalDecay: 0.9,
+      maxEnemies: 800
     }
   };
   let gameTimeLeft = 120;
@@ -1303,7 +1308,8 @@
     shotLevel: 2,      // 初期状態を2段階目（VERTICAL 2x）からスタート
     optionsCount: 0,   // 通常0〜4個。4個状態で取得すると+3個で計7個(10秒間)
     muzzleFlash: 0,
-    stunTimer: 0       // ボス攻撃被弾時のスタンタイマー（秒）
+    stunTimer: 0,       // ボス攻撃被弾時のスタンタイマー（秒）
+    invincibleTimer: 0  // 被弾後の短時間無敵＆点滅タイマー（秒）
   };
 
   // オプション配置座標計算ヘルパー
@@ -1568,6 +1574,7 @@
     player.optionsCount = 0;
     player.shootInterval = 12;
     player.stunTimer = 0;
+    player.invincibleTimer = 0;
     laserTimer = 0;
     optionBonusTimer = 0;
     bullets = [];
@@ -1792,6 +1799,11 @@
   /* --- 敵の生成（仕様5: 出現密度設定連動） --- */
   function spawnNormalWave() {
     const dCfg = DENSITY_CONFIGS[chosenDensity] || DENSITY_CONFIGS.normal;
+    // 最大敵数上限チェック（HARD: 600体など）
+    if (dCfg.maxEnemies && enemies.length >= dCfg.maxEnemies) {
+      return;
+    }
+
     const patterns = ['line', 'wide_line', 'v_shape', 'cluster'];
     const p = patterns[Math.floor(Math.random() * patterns.length)];
 
@@ -1799,7 +1811,11 @@
     // DEVIL(mega): 22列 × (2〜6行) = 44〜132体
     const devilRows = Math.min(2 + Math.floor(gameElapsed / 18), 6);
     const devilWaveSize = 22 * devilRows;
-    const waveSize = Math.max(dCfg.perRow, Math.round(devilWaveSize * (dCfg.ratio || 1.0)));
+    let waveSize = Math.max(dCfg.perRow, Math.round(devilWaveSize * (dCfg.ratio || 1.0)));
+    if (dCfg.maxEnemies && enemies.length + waveSize > dCfg.maxEnemies) {
+      waveSize = Math.max(0, dCfg.maxEnemies - enemies.length);
+      if (waveSize <= 0) return;
+    }
 
     const perRow = dCfg.perRow;
     const roadWidth = ROAD.rightWall - ROAD.leftWall;
@@ -2111,6 +2127,12 @@
     // 攻撃一時停止フラグ
     const isCeaseFire = (ceaseFireTimer > 0);
 
+    // 被弾後の短時間無敵タイマー管理
+    if (player.invincibleTimer > 0) {
+      player.invincibleTimer -= delta;
+      if (player.invincibleTimer < 0) player.invincibleTimer = 0;
+    }
+
     // プレイヤー行動可否判定（ボス攻撃被弾時のスタン状態：移動＆攻撃不可）
     const isStunned = (player.stunTimer > 0);
     if (isStunned) {
@@ -2264,18 +2286,19 @@
       }
     }
 
-    // オプション独立射撃（仕様: 自機の弾レベル - 1、最大4段階目まで(3列)、スタン中または攻撃一時停止中は射撃不可）
+    // オプション独立射撃（仕様: 最大攻撃レベルを1段階引き上げ、1発当たり最大2列→3列に強化）
+    // 自機Lv1: 1列(14f間隔), 自機Lv2: 1列(7f間隔), 自機Lv3: 2列(7f間隔), 自機Lv4以上: 3列(7f間隔・新最大)
     if (player.optionsCount > 0 && !isStunned && !isCeaseFire) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
-        const optLevel = Math.min(4, Math.max(1, (player.shotLevel || 1) - 1));
+        const optLevel = Math.min(4, Math.max(1, player.shotLevel || 1));
         const optPositions = getOptionPositions(player.optionsCount);
 
         optPositions.forEach((op, idx) => {
           const isSpecial = (idx >= 4);
           const bColor = isSpecial ? '#00f7ff' : '#ff9900';
-          if (optLevel < 3) {
-            // 1段階目・2段階目: 1列直進 (optLevel 2以上で縦2倍密度)
+          if (optLevel <= 2) {
+            // 1段階目・2段階目: 1列直進 (optLevel 2以上で縦2倍密度・高速連射)
             bullets.push({
               x: op.x,
               y: op.y,
@@ -2305,7 +2328,7 @@
               });
             });
           } else {
-            // 4段階目（最大）: 弾を3列に（ザコ1体に複数列が誤ヒットしない間隔を確保）
+            // 4段階目（新・最大）: 弾を3列に（最大3列）
             [-13, 0, 13].forEach(ox => {
               bullets.push({
                 x: op.x + ox,
@@ -2322,7 +2345,7 @@
             });
           }
         });
-        // 2段階目以降はオプションも縦2倍密度（インターバル半減）
+        // 2段階目以降はオプションも縦2倍密度（インターバル半減: 7フレーム）
         optionShootCooldown = (optLevel >= 2) ? 7 : 14;
       }
     }
@@ -2663,7 +2686,7 @@
       if (e.hp <= 0) continue;
 
       if (e.type === 'midboss') {
-        // 中ボス（戦車）の攻撃: 正面へ砲弾発射（遅め・当たったら1秒間スタン）
+        // 中ボス（戦車）の攻撃: 正面へ砲弾発射（遅め・当たったら弾orオプション1段階ダウン）
         e.attackCooldown = (e.attackCooldown || (120 + Math.floor(Math.random() * 60))) - 1;
         if (e.y > 10 && e.y < GAME_HEIGHT * 0.72 && e.attackCooldown <= 0) {
           e.attackCooldown = 150 + Math.floor(Math.random() * 50); // 約2.5〜3.3秒間隔
@@ -2674,8 +2697,7 @@
             vx: 0,
             vy: 2.6, // 遅めの砲弾
             radius: 5.5,
-            type: 'midboss_shell',
-            stunDuration: 1.0
+            type: 'midboss_shell'
           });
           sfx.tankFire();
           // 発射マズルフラッシュ火花
@@ -2695,7 +2717,7 @@
           }
         }
       } else if (e.type === 'boss') {
-        // 大ボス（移動城塞）の攻撃: 左右15度以内のいずれか1方向に高速レーザー光線（当たったら3秒間スタン）
+        // 大ボス（移動城塞）の攻撃: 左右15度以内のいずれか1方向に高速レーザー光線（当たったら弾＆オプション両方1段階ダウン）
         e.attackCooldown = (e.attackCooldown || (140 + Math.floor(Math.random() * 60))) - 1;
         if (e.y > -10 && e.y < GAME_HEIGHT * 0.68 && e.attackCooldown <= 0) {
           e.attackCooldown = 190 + Math.floor(Math.random() * 60); // 約3.2〜4.2秒間隔
@@ -2718,8 +2740,7 @@
             radius: 6,
             length: 44,
             width: 7,
-            type: 'boss_laser',
-            stunDuration: 3.0
+            type: 'boss_laser'
           });
           sfx.bossLaser();
           // 城塞主砲のマズルフラッシュ
@@ -2754,20 +2775,22 @@
       }
 
       // プレイヤー自機との当たり判定 (player.x, player.y, 半径14px)
+      if (player.invincibleTimer > 0) continue; // 被弾後の無敵時間中はスキップ
+
       const pR = 14;
       const dx = eb.x - player.x;
       const dy = eb.y - player.y;
       const hitDist = eb.radius + pR;
 
       if (dx * dx + dy * dy < hitDist * hitDist) {
-        // ボス攻撃が命中！指定秒数スタン付与（移動＆攻撃不可）
-        const stunSec = eb.stunDuration || 1.0;
-        player.stunTimer = Math.max(player.stunTimer, stunSec);
-        screenShake = (stunSec >= 3.0) ? 24 : 14;
-        sfx.stun();
+        // ボス攻撃が自機に命中！
+        const isBossLaser = (eb.type === 'boss_laser');
+        screenShake = isBossLaser ? 24 : 14;
+        player.invincibleTimer = 0.6; // 0.6秒間被弾無敵・機体点滅（連続多段ヒット防止）
+        sfx.hit();
 
         // 被弾スパーク発生
-        for (let k = 0; k < 12; k++) {
+        for (let k = 0; k < 14; k++) {
           hitEffects.push({
             x: player.x + (Math.random() * 24 - 12),
             y: player.y + (Math.random() * 24 - 12),
@@ -2775,14 +2798,77 @@
             vy: (Math.random() - 0.5) * 6,
             life: 0.6,
             decay: 0.06,
-            color: (stunSec >= 3.0) ? '#ff2255' : '#ffea00',
+            color: isBossLaser ? '#ff2255' : '#ffea00',
             size: 3.2
           });
         }
 
-        const stunText = (stunSec >= 3.0) ? '⚡ EMP STUN! 3秒 移動攻撃不能 ⚡' : '⚡ STUN! 1秒 移動攻撃不能 ⚡';
-        const textColor = (stunSec >= 3.0) ? '#ff3344' : '#ffea00';
-        createPopupText(player.x, player.y - 48, stunText, textColor);
+        if (isBossLaser) {
+          // 【大ボス（移動城塞）のレーザー被弾】
+          // 仕様変更: 従来の3秒停止を廃止し、弾とオプション両方を1段階ずつダウン
+          let shotDown = false;
+          let optDown = false;
+
+          // 弾ダウン処理 (Lv.7レーザーなら解除してLv.6、それ以外はLv1まで-1)
+          if (player.shotLevel >= 7) {
+            player.shotLevel = 6;
+            activeLaser = null;
+            laserTimer = 0;
+            shotDown = true;
+          } else if (player.shotLevel > 1) {
+            player.shotLevel--;
+            shotDown = true;
+          }
+
+          // オプションダウン処理 (7基ブースト中なら解除して4基、それ以外は0まで-1)
+          if (player.optionsCount > 4) {
+            player.optionsCount = 4;
+            optionBonusTimer = 0;
+            optDown = true;
+          } else if (player.optionsCount > 0) {
+            player.optionsCount--;
+            optDown = true;
+          }
+
+          updateHUD();
+          createPopupText(player.x, player.y - 48, '⚡ 城塞レーザー直撃！ 弾＆オプション両方Lvダウン！', '#ff3344');
+        } else {
+          // 【中ボス（戦車）の砲弾被弾】
+          // 仕様変更: 従来の1秒停止を廃止し、弾orオプションいずれか一方を1段階ダウン（ランダム）
+          const canDownShot = (player.shotLevel > 1);
+          const canDownOpt = (player.optionsCount > 0);
+
+          let targetDown = null;
+          if (canDownShot && canDownOpt) {
+            targetDown = (Math.random() < 0.5) ? 'shot' : 'option';
+          } else if (canDownShot) {
+            targetDown = 'shot';
+          } else if (canDownOpt) {
+            targetDown = 'option';
+          }
+
+          if (targetDown === 'shot') {
+            if (player.shotLevel >= 7) {
+              player.shotLevel = 6;
+              activeLaser = null;
+              laserTimer = 0;
+            } else {
+              player.shotLevel--;
+            }
+            updateHUD();
+            createPopupText(player.x, player.y - 48, `💥 砲弾被弾！ 弾Lvダウン (-1) -> Lv.${player.shotLevel}`, '#ff9900');
+          } else if (targetDown === 'option') {
+            if (player.optionsCount > 4) {
+              player.optionsCount = 4;
+              optionBonusTimer = 0;
+            } else {
+              player.optionsCount--;
+            }
+            createPopupText(player.x, player.y - 48, `💥 砲弾被弾！ オプション損失 (-1基) -> 残り${player.optionsCount}基`, '#ff9900');
+          } else {
+            createPopupText(player.x, player.y - 48, '💥 被弾！ (装備最低Lv維持)', '#ffff00');
+          }
+        }
 
         enemyBullets.splice(i, 1);
       }
@@ -3046,6 +3132,13 @@
 
     ctx.save();
     ctx.translate(player.x, player.y);
+
+    // 被弾無敵時の点滅描画（0.6秒間）
+    if (player.invincibleTimer > 0) {
+      if (Math.floor(player.invincibleTimer * 24) % 2 === 0) {
+        ctx.globalAlpha = 0.35;
+      }
+    }
 
     // スタン中の電撃スパークエフェクト（車体周辺のスパーク稲妻）
     if (isStunned) {
