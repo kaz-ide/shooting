@@ -465,7 +465,7 @@
       ・<strong>攻撃一時停止 [Shift/パッドB(○)/⏸]:</strong> 1秒間攻撃停止(再押しで即再開)。アイテム誤取得防止<br>
       ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
       &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体2ダメ/弾2発分)</span> ※ボス撃破で自動誘爆<br>
-      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション最大3列連射/4基時取得で特殊3基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/破壊で赤ボム+1000点)<br>
+      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション1・2基目最大3列、3基目以降最大2列/4基時取得で特殊2基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/破壊で赤ボム+1000点)<br>
       ・<strong>ボス被弾:</strong> 中ボス砲弾＝弾orオプション1段階ダウン(ランダム) / 大ボスレーザー＝弾＆オプション両方1段階ダウン<br>
       ・<strong>メニュー/パッド:</strong> [十字キー/矢印] 選択、[Enter/START/A] 即スタート
     </div>
@@ -1306,7 +1306,7 @@
     shootInterval: 12, // 通常フレーム間隔
     // パワーアップ状態
     shotLevel: 2,      // 初期状態を2段階目（VERTICAL 2x）からスタート
-    optionsCount: 0,   // 通常0〜4個。4個状態で取得すると+3個で計7個(10秒間)
+    optionsCount: 0,   // 通常0〜4個。4個状態で取得すると+2個で計6個(10秒間)
     muzzleFlash: 0,
     stunTimer: 0,       // ボス攻撃被弾時のスタンタイマー（秒）
     invincibleTimer: 0  // 被弾後の短時間無敵＆点滅タイマー（秒）
@@ -1314,7 +1314,7 @@
 
   // オプション配置座標計算ヘルパー
   // 通常最大4個（1:左1, 2:右1, 3:左2, 4:右2）
-  // 4個所持時に追加取得で+3個（計7個）: 5:左端, 6:右端, 7:自機の前（10秒間限定）
+  // 4個所持時に追加取得で+2個（計6個）: 5:左端, 6:右端（10秒間限定・真ん中+1は削除）
   function getOptionPositions(count) {
     const positions = [];
     const slots = [
@@ -1322,9 +1322,8 @@
       { dx: 34, dy: -8 },    // 2個目: 右1
       { dx: -54, dy: 4 },    // 3個目: 左2
       { dx: 54, dy: 4 },     // 4個目: 右2
-      { dx: -78, dy: 16 },   // 5個目: 左端 (+3追加時)
-      { dx: 78, dy: 16 },    // 6個目: 右端 (+3追加時)
-      { dx: 0, dy: -46 }     // 7個目: 自機の前 (+3追加時)
+      { dx: -78, dy: 16 },   // 5個目: 左端 (+2追加時)
+      { dx: 78, dy: 16 }     // 6個目: 右端 (+2追加時)
     ];
     for (let i = 0; i < Math.min(count, slots.length); i++) {
       positions.push({
@@ -1347,7 +1346,7 @@
   let popupTexts = [];  // 残りスタミナ等の数値ポップアップ
   let zakoExplosions = []; // ザコ敵撃破時の超軽量2コマ連番爆発スプライト
   let laserTimer = 0;        // レーザーの有効時間（初期10秒、追加取得で+10秒）
-  let optionBonusTimer = 0;  // オプション4個時の+3個(計7個)ボーナス有効時間（10秒、追加取得で+10秒）
+  let optionBonusTimer = 0;  // オプション4個時の+2個(計6個)ボーナス有効時間（10秒、追加取得で+10秒）
 
   // ボム用フラッシュ（黒ボム: 弱め白 / 赤ボム: 強烈赤フラッシュ）
   let bombFlashAlpha = 0;
@@ -2097,7 +2096,7 @@
       }
     }
 
-    // オプション4個時の+3個(計7個)ボーナス有効時間管理（仕様: 10秒経過したら4個に戻る）
+    // オプション4個時の+2個(計6個)ボーナス有効時間管理（仕様: 10秒経過したら4個に戻る）
     if (optionBonusTimer > 0) {
       optionBonusTimer -= delta;
       if (optionBonusTimer <= 0) {
@@ -2286,8 +2285,8 @@
       }
     }
 
-    // オプション独立射撃（仕様: 最大攻撃レベルを1段階引き上げ、1発当たり最大2列→3列に強化）
-    // 自機Lv1: 1列(14f間隔), 自機Lv2: 1列(7f間隔), 自機Lv3: 2列(7f間隔), 自機Lv4以上: 3列(7f間隔・新最大)
+    // オプション独立射撃（仕様調整: 1・2個目は最大3列、3個目以降は最大2列までに抑える）
+    // 自機Lv1: 1列(14f間隔), 自機Lv2: 1列(7f間隔), 自機Lv3: 2列(7f間隔), 自機Lv4以上: 1・2個目は3列/3個目以降は2列(7f間隔)
     if (player.optionsCount > 0 && !isStunned && !isCeaseFire) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
@@ -2297,7 +2296,11 @@
         optPositions.forEach((op, idx) => {
           const isSpecial = (idx >= 4);
           const bColor = isSpecial ? '#00f7ff' : '#ff9900';
-          if (optLevel <= 2) {
+          // 3個目以降（idx >= 2: 3個目, 4個目, 5個目, 6個目）の弾は最大2列までに抑える
+          const maxCols = (idx >= 2) ? 3 : 4;
+          const currentOptLevel = Math.min(optLevel, maxCols);
+
+          if (currentOptLevel <= 2) {
             // 1段階目・2段階目: 1列直進 (optLevel 2以上で縦2倍密度・高速連射)
             bullets.push({
               x: op.x,
@@ -2311,8 +2314,8 @@
               fromOption: true,
               fromSpecialOption: isSpecial
             });
-          } else if (optLevel === 3) {
-            // 3段階目: 弾を2列に
+          } else if (currentOptLevel === 3) {
+            // 3段階目（または3個目以降の最大列数）: 弾を2列に
             [-7, 7].forEach(ox => {
               bullets.push({
                 x: op.x + ox,
@@ -2328,7 +2331,7 @@
               });
             });
           } else {
-            // 4段階目（新・最大）: 弾を3列に（最大3列）
+            // 4段階目（1個目・2個目のオプションのみ）: 弾を3列に
             [-13, 0, 13].forEach(ox => {
               bullets.push({
                 x: op.x + ox,
@@ -2463,15 +2466,15 @@
             const maxLabel = (player.optionsCount === 4) ? ' MAX' : '';
             createPopupText(player.x, player.y - 45, `OPTION +1 (${sideLabel}) [${player.optionsCount}/4]${maxLabel}!`, '#00ffff');
           } else if (player.optionsCount === 4 && optionBonusTimer <= 0) {
-            // オプション４個状態でのオプション取得したら、＋3個追加（左端、右端、自機の前）
+            // オプション4個状態でのオプション取得したら、＋2個追加（左端、右端。真ん中+1は削除）
             // その代わり10秒経過したら4個に戻る
-            player.optionsCount = 7;
+            player.optionsCount = 6;
             optionBonusTimer = 10.0;
-            createPopupText(player.x, player.y - 45, '⚡ OPTION BOOST! +3基追加 (計7基/10秒) ⚡', '#ffcc00');
+            createPopupText(player.x, player.y - 45, '⚡ OPTION BOOST! +2基追加 (計6基/10秒) ⚡', '#ffcc00');
             score += 400;
           } else {
             // 10秒以内にもう１個取ったら+10秒
-            player.optionsCount = 7;
+            player.optionsCount = 6;
             optionBonusTimer += 10.0;
             createPopupText(player.x, player.y - 45, `⚡ OPTION BOOST +10s! (${Math.ceil(optionBonusTimer)}s) ⚡`, '#ffcc00');
             score += 500;
@@ -2820,7 +2823,7 @@
             shotDown = true;
           }
 
-          // オプションダウン処理 (7基ブースト中なら解除して4基、それ以外は0まで-1)
+          // オプションダウン処理 (6基ブースト中なら解除して4基、それ以外は0まで-1)
           if (player.optionsCount > 4) {
             player.optionsCount = 4;
             optionBonusTimer = 0;
@@ -3261,7 +3264,7 @@
       ctx.restore();
     }
 
-    // 足元ステータスインジケーター（レーザー残り時間 & オプション7基残り時間）
+    // 足元ステータスインジケーター（レーザー残り時間 & オプション6基残り時間）
     let gaugeOffsetY = player.y + player.height / 2 + 8;
 
     if (player.shotLevel >= 7 && laserTimer > 0) {
@@ -3293,7 +3296,7 @@
     }
 
     if (optionBonusTimer > 0) {
-      // オプション7基ブースト残り時間インジケーター（10秒カウントダウンゲージ、延長対応）
+      // オプション6基ブースト残り時間インジケーター（10秒カウントダウンゲージ、延長対応）
       ctx.save();
       const gaugeW = 52;
       const gaugeH = 4;
@@ -3311,14 +3314,14 @@
       ctx.textAlign = 'center';
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2.5;
-      const oText = `⚡ OPTION 7基 ${Math.ceil(optionBonusTimer)}s`;
+      const oText = `⚡ OPTION 6基 ${Math.ceil(optionBonusTimer)}s`;
       ctx.strokeText(oText, player.x, gy - 2);
       ctx.fillStyle = (optionBonusTimer <= 3) ? '#ff9999' : '#ffea00';
       ctx.fillText(oText, player.x, gy - 2);
       ctx.restore();
     }
 
-    // 分身（オプション）の描画（通常最大4個、ボーナス時7個）
+    // 分身（オプション）の描画（通常最大4個、ボーナス時6個）
     if (player.optionsCount > 0) {
       const optPositions = getOptionPositions(player.optionsCount);
       optPositions.forEach((op, idx) => {
@@ -3370,7 +3373,7 @@
     ctx.restore();
   }
 
-  /* スペシャルオプション（7基モード時の3基: 超高輝度フォトン・プラズマオーブ） */
+  /* スペシャルオプション（6基モード時の追加2基: 超高輝度フォトン・プラズマオーブ） */
   function drawSpecialBurstOption(x, y) {
     ctx.save();
     ctx.translate(x, y);
