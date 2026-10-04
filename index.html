@@ -465,7 +465,7 @@
       ・<strong>攻撃一時停止 [Shift/パッドB(○)/⏸]:</strong> 1秒間攻撃停止(再押しで即再開)。アイテム誤取得防止<br>
       ・<strong>ボム [Space/A/X]:</strong> 最大3個。<br>
       &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体2ダメ/弾2発分)</span> ※ボス撃破で自動誘爆<br>
-      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション1・2基目最大3列、3基目以降最大2列/4基時取得で特殊2基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/破壊で赤ボム+1000点)<br>
+      ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション全基最大2列連射/4基時取得で特殊2基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/破壊で赤ボム+1000点)<br>
       ・<strong>ボス被弾:</strong> 中ボス砲弾＝弾orオプション1段階ダウン(ランダム) / 大ボスレーザー＝弾＆オプション両方1段階ダウン<br>
       ・<strong>メニュー/パッド:</strong> [十字キー/矢印] 選択、[Enter/START/A] 即スタート
     </div>
@@ -1314,16 +1314,17 @@
 
   // オプション配置座標計算ヘルパー
   // 通常最大4個（1:左1, 2:右1, 3:左2, 4:右2）
-  // 4個所持時に追加取得で+2個（計6個）: 5:左端, 6:右端（10秒間限定・真ん中+1は削除）
+  // 4個所持時に追加取得で+2個（計6個）: 5:左端, 6:右端（10秒間限定）
+  // ※仕様調整: オプション間に兵隊（直径13px）が通過できるすき間（約14〜15px）を空けて配置
   function getOptionPositions(count) {
     const positions = [];
     const slots = [
-      { dx: -34, dy: -8 },   // 1個目: 左1
-      { dx: 34, dy: -8 },    // 2個目: 右1
-      { dx: -54, dy: 4 },    // 3個目: 左2
-      { dx: 54, dy: 4 },     // 4個目: 右2
-      { dx: -78, dy: 16 },   // 5個目: 左端 (+2追加時)
-      { dx: 78, dy: 16 }     // 6個目: 右端 (+2追加時)
+      { dx: -45, dy: -8 },   // 1個目: 左1 (自機との間隔14px)
+      { dx: 45, dy: -8 },    // 2個目: 右1 (自機との間隔14px)
+      { dx: -84, dy: 6 },    // 3個目: 左2 (1個目との間隔15px)
+      { dx: 84, dy: 6 },     // 4個目: 右2 (2個目との間隔15px)
+      { dx: -123, dy: 20 },  // 5個目: 左端 (+2追加時、3個目との間隔15px)
+      { dx: 123, dy: 20 }    // 6個目: 右端 (+2追加時、4個目との間隔15px)
     ];
     for (let i = 0; i < Math.min(count, slots.length); i++) {
       positions.push({
@@ -2285,22 +2286,19 @@
       }
     }
 
-    // オプション独立射撃（仕様調整: 1・2個目は最大3列、3個目以降は最大2列までに抑える）
-    // 自機Lv1: 1列(14f間隔), 自機Lv2: 1列(7f間隔), 自機Lv3: 2列(7f間隔), 自機Lv4以上: 1・2個目は3列/3個目以降は2列(7f間隔)
+    // オプション独立射撃（仕様: オプションの弾は全て最大2列まで）
+    // 自機Lv1: 1列(14f間隔), 自機Lv2: 1列(7f間隔), 自機Lv3以上: 2列(7f間隔・全基最大2列)
     if (player.optionsCount > 0 && !isStunned && !isCeaseFire) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
-        const optLevel = Math.min(4, Math.max(1, player.shotLevel || 1));
+        const optLevel = Math.min(3, Math.max(1, player.shotLevel || 1));
         const optPositions = getOptionPositions(player.optionsCount);
 
         optPositions.forEach((op, idx) => {
           const isSpecial = (idx >= 4);
           const bColor = isSpecial ? '#00f7ff' : '#ff9900';
-          // 3個目以降（idx >= 2: 3個目, 4個目, 5個目, 6個目）の弾は最大2列までに抑える
-          const maxCols = (idx >= 2) ? 3 : 4;
-          const currentOptLevel = Math.min(optLevel, maxCols);
 
-          if (currentOptLevel <= 2) {
+          if (optLevel <= 2) {
             // 1段階目・2段階目: 1列直進 (optLevel 2以上で縦2倍密度・高速連射)
             bullets.push({
               x: op.x,
@@ -2314,25 +2312,9 @@
               fromOption: true,
               fromSpecialOption: isSpecial
             });
-          } else if (currentOptLevel === 3) {
-            // 3段階目（または3個目以降の最大列数）: 弾を2列に
-            [-7, 7].forEach(ox => {
-              bullets.push({
-                x: op.x + ox,
-                y: op.y,
-                startY: op.y,
-                vx: 0,
-                vy: -13,
-                damage: 0.7,
-                isPower: true,
-                color: bColor,
-                fromOption: true,
-                fromSpecialOption: isSpecial
-              });
-            });
           } else {
-            // 4段階目（1個目・2個目のオプションのみ）: 弾を3列に
-            [-13, 0, 13].forEach(ox => {
+            // 3段階目以上: 弾を2列に（仕様: 全てのオプション最大2列までに抑える）
+            [-7, 7].forEach(ox => {
               bullets.push({
                 x: op.x + ox,
                 y: op.y,
