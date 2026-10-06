@@ -1312,19 +1312,49 @@
     invincibleTimer: 0  // 被弾後の短時間無敵＆点滅タイマー（秒）
   };
 
+  // ==========================================
+  // オプション発射間隔（攻撃クールダウン）管理パラメータ
+  // ==========================================
+  // オプションの連射速度を一括管理・容易にチューニング可能とする定数
+  // 仕様: 自機の弾の発射間隔よりも50%間を空ける（自機の発射間隔 × 1.5倍）
+  // 自機本体の発射間隔: Lv2以上で6フレーム、Lv1で12フレーム (player.shootInterval)
+  // オプション発射間隔:
+  //   Lv2以上: 6 × 1.5 = 9フレーム (自機6fより50%間隔を空ける)
+  //   Lv1:    12 × 1.5 = 18フレーム (自機12fより50%間隔を空ける)
+  const OPTION_FIRE_INTERVAL = {
+    RATIO_TO_PLAYER: 1.5, // 自機比1.5倍（自機の弾よりも50%間を空ける）
+    get RATE_MULTIPLIER() { return this.RATIO_TO_PLAYER; },
+    set RATE_MULTIPLIER(val) { this.RATIO_TO_PLAYER = val; },
+    PLAYER_FAST: 6,       // 自機Lv2以上の基準発射間隔（6フレーム）
+    PLAYER_NORMAL: 12,    // 自機Lv1の基準発射間隔（12フレーム）
+    BASE_FAST: 6,         // 互換用
+    BASE_NORMAL: 12,      // 互換用
+    INITIAL_DELAY: 24,    // ゲーム開始時／リセット時の初期待機フレーム数
+
+    // 適用される実インターバルフレーム数（自機発射間隔 × RATIO_TO_PLAYER）
+    get FAST() {
+      return Math.round(this.PLAYER_FAST * this.RATIO_TO_PLAYER); // 6 × 1.5 = 9フレーム
+    },
+    get NORMAL() {
+      return Math.round(this.PLAYER_NORMAL * this.RATIO_TO_PLAYER); // 12 × 1.5 = 18フレーム
+    },
+    get fast() { return this.FAST; },
+    get normal() { return this.NORMAL; }
+  };
+
   // オプション配置座標計算ヘルパー
   // 通常最大4個（1:左1, 2:右1, 3:左2, 4:右2）
-  // 4個所持時に追加取得で+2個（計6個）: 5:左端, 6:右端（10秒間限定）
-  // ※仕様調整: オプション間に兵隊（直径13px）が通過できるすき間（約14〜15px）を空けて配置
+  // 4個所持時に追加取得で+2個（計6個）: 5:左端, 6:右端（10秒間限定・真ん中+1は削除）
+  // ※元の隣接配置（ほぼ隣り合う間隔）に復元
   function getOptionPositions(count) {
     const positions = [];
     const slots = [
-      { dx: -45, dy: -8 },   // 1個目: 左1 (自機との間隔14px)
-      { dx: 45, dy: -8 },    // 2個目: 右1 (自機との間隔14px)
-      { dx: -84, dy: 6 },    // 3個目: 左2 (1個目との間隔15px)
-      { dx: 84, dy: 6 },     // 4個目: 右2 (2個目との間隔15px)
-      { dx: -123, dy: 20 },  // 5個目: 左端 (+2追加時、3個目との間隔15px)
-      { dx: 123, dy: 20 }    // 6個目: 右端 (+2追加時、4個目との間隔15px)
+      { dx: -34, dy: -8 },   // 1個目: 左1
+      { dx: 34, dy: -8 },    // 2個目: 右1
+      { dx: -54, dy: 4 },    // 3個目: 左2
+      { dx: 54, dy: 4 },     // 4個目: 右2
+      { dx: -74, dy: 16 },   // 5個目: 左端 (+2追加時)
+      { dx: 74, dy: 16 }     // 6個目: 右端 (+2追加時)
     ];
     for (let i = 0; i < Math.min(count, slots.length); i++) {
       positions.push({
@@ -1593,7 +1623,7 @@
     // 大ボス: 30秒(1800f)後から出現を許可
     // bossNextTime = 残り時間 - 30秒 より前には出さない
     bossNextTime = gameTimeLeft - 30;
-    optionShootCooldown = 24;
+    optionShootCooldown = OPTION_FIRE_INTERVAL.INITIAL_DELAY;
     bombFlashAlpha = 0;
     bombFlashColor = '#ffffff';
     bombFlashDecay = 0.08;
@@ -2181,7 +2211,7 @@
       player.shootCooldown--;
       if (player.shootCooldown <= 0) {
         fireBullets();
-        player.shootCooldown = (player.shotLevel >= 2) ? 6 : player.shootInterval;
+        player.shootCooldown = (player.shotLevel >= 2) ? OPTION_FIRE_INTERVAL.PLAYER_FAST : player.shootInterval;
       }
     }
     if (player.muzzleFlash > 0) player.muzzleFlash--;
@@ -2287,7 +2317,8 @@
     }
 
     // オプション独立射撃（仕様: オプションの弾は全て最大2列まで）
-    // 自機Lv1: 1列(14f間隔), 自機Lv2: 1列(7f間隔), 自機Lv3以上: 2列(7f間隔・全基最大2列)
+    // 自機Lv1: 1列, 自機Lv2以上: 2列（全基最大2列）
+    // 発射間隔（クールダウン）は定数 OPTION_FIRE_INTERVAL（自機の弾よりも50%間を空ける＝1.5倍）で一括管理
     if (player.optionsCount > 0 && !isStunned && !isCeaseFire) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
@@ -2330,8 +2361,8 @@
             });
           }
         });
-        // 2段階目以降はオプションも縦2倍密度（インターバル半減: 7フレーム）
-        optionShootCooldown = (optLevel >= 2) ? 7 : 14;
+        // オプション発射クールダウン（自機比1.5倍＝50%延長適用: Lv2以上で9f、Lv1で18f）
+        optionShootCooldown = (optLevel >= 2) ? OPTION_FIRE_INTERVAL.FAST : OPTION_FIRE_INTERVAL.NORMAL;
       }
     }
 
