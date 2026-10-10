@@ -1399,12 +1399,13 @@
     const cx = halfW;
     const cy = halfH;
 
-    // 白(HP1)、グレー(HP2)、黒(HP3)、赤(予備)
+    // 白(HP1)、グレー(HP2)、黒(HP3)、赤(予備)、銅色(HP4)
     const configs = {
-      white: { fill: '#e6edf3', stroke: '#8b949e', core: '#ff3333', pants: '#30363d', gun: '#161b22', gunHl: '#8b949e' },
-      gray:  { fill: '#89929b', stroke: '#57606a', core: '#ff5533', pants: '#24292f', gun: '#0d1117', gunHl: '#6e7681' },
-      black: { fill: '#21262d', stroke: '#ff3333', core: '#ff2222', pants: '#161b22', gun: '#0d1117', gunHl: '#ff4444' },
-      red:   { fill: '#cf222e', stroke: '#ff7b72', core: '#ffffff', pants: '#21262d', gun: '#0d1117', gunHl: '#ff9999' }
+      white:  { fill: '#e6edf3', stroke: '#8b949e', core: '#ff3333', pants: '#30363d', gun: '#161b22', gunHl: '#8b949e' },
+      gray:   { fill: '#89929b', stroke: '#57606a', core: '#ff5533', pants: '#24292f', gun: '#0d1117', gunHl: '#6e7681' },
+      black:  { fill: '#21262d', stroke: '#ff3333', core: '#ff2222', pants: '#161b22', gun: '#0d1117', gunHl: '#ff4444' },
+      red:    { fill: '#cf222e', stroke: '#ff7b72', core: '#ffffff', pants: '#21262d', gun: '#0d1117', gunHl: '#ff9999' },
+      copper: { fill: '#cd7f32', stroke: '#8c4b18', core: '#ffcc00', pants: '#2b1b0e', gun: '#150d06', gunHl: '#e69a4e' }
     };
 
     for (const [key, cfg] of Object.entries(configs)) {
@@ -1507,6 +1508,16 @@
 
       enemySprites[key] = frames;
     }
+    enemySprites.bronze = enemySprites.copper;
+  }
+
+  // 兵士のHPに応じた色種別判定（銅色4 -> 黒3 -> 灰2 -> 白1）
+  function getSoldierColorType(hp) {
+    const chp = Math.ceil(hp);
+    if (chp >= 4) return 'copper';
+    if (chp === 3) return 'black';
+    if (chp === 2) return 'gray';
+    return 'white';
   }
 
   // ===== オフスクリーンCanvas（ザコ爆発2コマ連番スプライト事前キャッシュ）=====
@@ -1669,11 +1680,8 @@
             }
           }
         } else {
-          // 被弾変色: 黒 -> 灰 -> 白
-          const chp = Math.ceil(e.hp);
-          if (chp >= 3) e.colorType = 'black';
-          else if (chp === 2) e.colorType = 'gray';
-          else e.colorType = 'white';
+          // 被弾変色: 銅色 -> 黒 -> 灰 -> 白
+          e.colorType = getSoldierColorType(e.hp);
         }
       } else if (e.type === 'midboss') {
         // 中ボスへのダメージ: 黒ボムは12ダメ、赤ボムは35ダメ
@@ -1788,22 +1796,30 @@
 
     // 画面上にすでに障害物(ARMOR/金属板)が存在するか
     const hasActiveObstacle = supplyBoxes.some(b => b.type === 'obstacle');
-    // 要望: 最初の30秒は出ない、いきなり2連続で出現して詰まないよう十分なインターバル(最低35秒以上)を確保
+    // 要望: ドラム缶・金属板ともに最初の30秒は出ない、障害物はインターバル(最低35秒以上)を確保
     const canSpawnObstacle = (gameElapsed >= 30) && !hasActiveObstacle && ((gameElapsed - lastObstacleSpawnTime) >= 35);
+    const canSpawnDrumCan = (gameElapsed >= 30);
 
-    // アイテム種類: spread / option / bomb_black / bomb_red / obstacle（障害物/金属板）の5系統
+    // アイテム種類: spread / option / bomb_black / bomb_red / drum_can（ドラム缶） / obstacle（障害物/金属板）
     const rnd = Math.random();
     let boxType;
-    if (rnd < 0.24) {
+    if (rnd < 0.25) {
       boxType = 'spread';
-    } else if (rnd < 0.48) {
+    } else if (rnd < 0.50) {
       boxType = 'option';
-    } else if (rnd < 0.64) {
+    } else if (rnd < 0.68) {
       boxType = 'bomb_black';
-    } else if (rnd < 0.80 || !canSpawnObstacle) {
+    } else if (rnd < 0.84 || (!canSpawnDrumCan && !canSpawnObstacle)) {
+      // 最初の30秒間、または危険物が出ないタイミングでは赤ボムを補給
       boxType = 'bomb_red';
+    } else if (!canSpawnObstacle || (rnd < 0.93 && canSpawnDrumCan)) {
+      // ドラム缶（金属板同様、最初の30秒は出ない。原子力マーク・撃ち抜くと画面全体の兵士HP+1）
+      boxType = 'drum_can';
+      boxHp = 3; // ドラム缶の耐久力: 3発
+      bWidth = 28;
+      bHeight = 34;
     } else {
-      // 障害物: 金属板（防壁プレート・ARMOR）。固さは中ボスと完全に同じ！
+      // 障害物: 金属板（防壁プレート・ARMOR。最初の30秒は出ない）。固さは中ボスと完全に同じ！
       boxType = 'obstacle';
       lastObstacleSpawnTime = gameElapsed;
       boxHp = 80 + Math.floor(gameElapsed * 0.6); // 中ボス(TANK)と同じHP計算式
@@ -1856,31 +1872,39 @@
       let colorType = 'white';
 
       if (chosenDensity === 'normal' || chosenDensity === 'hard') {
-        // EASY & NORMAL: 固さ1 (白のみ)
+        // NORMAL以下 (EASY & NORMAL): そのまま (固さ1 / 白のみ)
         hp = 1;
         colorType = 'white';
-      } else if (chosenDensity === 'expert') {
-        // HARD: 固さ1と2のみ (白60%, 灰40%)
-        const rVal = Math.random() * 10;
-        if (rVal < 6.0) {
-          hp = 1;
-          colorType = 'white';
-        } else {
-          hp = 2;
-          colorType = 'gray';
-        }
       } else {
-        // DEVIL: 今と同じ (白50%, 灰40%, 黒10%)
+        // HARD以上 (HARD & DEVIL)
         const rVal = Math.random() * 10;
-        if (rVal < 5) {
-          hp = 1;
-          colorType = 'white';
-        } else if (rVal < 9) {
-          hp = 2;
-          colorType = 'gray';
+        if (gameElapsed < 30) {
+          // 最初の30秒: 白 40% ： 灰 30% ： 黒 30% (銅兵士は出さない)
+          if (rVal < 4.0) {
+            hp = 1;
+            colorType = 'white';
+          } else if (rVal < 7.0) {
+            hp = 2;
+            colorType = 'gray';
+          } else {
+            hp = 3;
+            colorType = 'black';
+          }
         } else {
-          hp = 3;
-          colorType = 'black';
+          // 30秒経過後: 白 40% ： 灰 30% ： 黒 20% ： 銅 10%
+          if (rVal < 4.0) {
+            hp = 1;
+            colorType = 'white';
+          } else if (rVal < 7.0) {
+            hp = 2;
+            colorType = 'gray';
+          } else if (rVal < 9.0) {
+            hp = 3;
+            colorType = 'black';
+          } else {
+            hp = 4;
+            colorType = 'copper';
+          }
         }
       }
 
@@ -1917,6 +1941,19 @@
         }
       }
 
+      // 中ボス出現中の場合、中ボス直上への重なり生成を回避
+      const onScreenMidBoss = enemies.find(e => e.type === 'midboss');
+      if (onScreenMidBoss) {
+        const mbW = onScreenMidBoss.radius * 1.3;
+        if (Math.abs(y - onScreenMidBoss.y) < onScreenMidBoss.radius + 25 && Math.abs(x - onScreenMidBoss.x) < mbW) {
+          if (x < onScreenMidBoss.x) {
+            x = Math.max(ROAD.leftWall + 10, onScreenMidBoss.x - mbW - 8 - Math.random() * 10);
+          } else {
+            x = Math.min(ROAD.rightWall - 10, onScreenMidBoss.x + mbW + 8 + Math.random() * 10);
+          }
+        }
+      }
+
       enemies.push({
         type: 'normal',
         colorType: colorType,
@@ -1936,7 +1973,12 @@
 
   function spawnMidBoss() {
     // 中ボス（戦車）: 定期的に出現。速度は従来の半減
-    const x = ROAD.leftWall + 40 + Math.random() * (ROAD.rightWall - ROAD.leftWall - 80);
+    let x = ROAD.leftWall + 40 + Math.random() * (ROAD.rightWall - ROAD.leftWall - 80);
+    // 大ボス出現中の場合、大ボスの位置との重なり生成を回避
+    const bigBoss = enemies.find(e => e.type === 'boss' && e.hp > 0);
+    if (bigBoss && Math.abs(x - bigBoss.x) < 85) {
+      x = (bigBoss.x < GAME_WIDTH / 2) ? (ROAD.rightWall - 60) : (ROAD.leftWall + 60);
+    }
     const hp = 80 + Math.floor(gameElapsed * 0.6);
     enemies.push({
       type: 'midboss',
@@ -2216,7 +2258,7 @@
     }
     if (player.muzzleFlash > 0) player.muzzleFlash--;
 
-    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中または攻撃一時停止中は照射不可、手前から最大30体貫通で遮断）
+    // 7段階目: 青い貫通レーザー光線の照射制御（0.2秒間隔、スタン中または攻撃一時停止中は照射不可、手前から最大24体貫通で遮断）
     if (player.shotLevel >= 7 && !isStunned && !isCeaseFire) {
       if (laserCooldown > 0) laserCooldown--;
       if (laserCooldown <= 0) {
@@ -2242,8 +2284,8 @@
                  e.y <= startY + e.radius;
         }).sort((a, b) => b.y - a.y);
 
-        // 仕様: 貫通力を1.5倍に強化（20体 → 30体まで貫通。30体到達でレーザー遮断）
-        const maxPierce = 30;
+        // 仕様: 貫通力を今の80%に調整（30体 → 24体まで貫通。24体到達でレーザー遮断）
+        const maxPierce = 24;
         const hitCount = Math.min(inLineEnemies.length, maxPierce);
 
         for (let idx = 0; idx < hitCount; idx++) {
@@ -2269,21 +2311,18 @@
               createPopupText(e.x, e.y - e.radius - 12, `HP: ${Math.max(0, Math.ceil(e.hp))}`, '#00f7ff');
             }
           } else if (e.type === 'normal') {
-            const chp = Math.ceil(e.hp);
-            if (chp >= 3) e.colorType = 'black';
-            else if (chp === 2) e.colorType = 'gray';
-            else e.colorType = 'white';
+            e.colorType = getSoldierColorType(e.hp);
           }
 
-          // 30体目に到達したら、レーザーの先端をその敵の地点で遮断
+          // 24体目に到達したら、レーザーの先端をその敵の地点で遮断
           if (idx === maxPierce - 1) {
             activeLaser.length = Math.max(15, startY - e.y);
           }
         }
 
-        // 障害物（防壁プレート）にもレーザー照射がヒット
+        // 障害物（防壁プレート）やドラム缶にもレーザー照射がヒット
         supplyBoxes.forEach(box => {
-          if (box.type === 'obstacle' && Math.abs(box.x - player.x) <= box.width / 2 + 8 &&
+          if ((box.type === 'obstacle' || box.type === 'drum_can') && Math.abs(box.x - player.x) <= box.width / 2 + 8 &&
               box.y >= startY - laserLength && box.y <= startY) {
             box.hp = Math.max(0, Math.round((box.hp - activeLaser.damage) * 10) / 10);
             sfx.metalHit();
@@ -2294,7 +2333,7 @@
               vy: (Math.random() - 0.5) * 4,
               life: 0.4,
               decay: 0.1,
-              color: '#00ffff',
+              color: (box.type === 'drum_can') ? '#39d353' : '#00ffff',
               size: 2.5
             });
           }
@@ -2412,6 +2451,18 @@
               color: '#00f7ff',
               size: 2.8
             });
+          } else if (box.type === 'drum_can') {
+            sfx.metalHit();
+            hitEffects.push({
+              x: b.x,
+              y: b.y,
+              vx: (Math.random() - 0.5) * 4,
+              vy: (Math.random() - 0.5) * 4,
+              life: 0.5,
+              decay: 0.1,
+              color: '#39d353',
+              size: 2.8
+            });
           } else {
             sfx.hit();
             hitEffects.push({
@@ -2521,6 +2572,37 @@
           bombs.push('red');
           updateHUD();
           createPopupText(player.x, player.y - 30, 'ボーナス: 赤ボム獲得!', '#ff4444');
+        } else if (box.type === 'drum_can') {
+          // ドラム缶撃ち抜き！放射能汚染により画面全体の兵士HP+1（最大4）
+          sfx.explode();
+          createExplosion(box.x, box.y, 44, '#39d353');
+          createExplosion(box.x, box.y, 24, '#ffff00');
+          screenShake = 14;
+
+          enemies.forEach(e => {
+            if (e.type === 'normal' && e.hp > 0 && !e.dead) {
+              e.hp = Math.min(4, Math.ceil(e.hp) + 1);
+              e.maxHp = Math.max(e.maxHp, e.hp);
+              e.colorType = getSoldierColorType(e.hp);
+
+              // 放射能変異スパーク
+              if (hitEffects.length < 80) {
+                hitEffects.push({
+                  x: e.x,
+                  y: e.y,
+                  vx: (Math.random() - 0.5) * 3,
+                  vy: -Math.random() * 2 - 1,
+                  life: 0.5,
+                  decay: 0.08,
+                  color: '#39d353',
+                  size: 2.6
+                });
+              }
+            }
+          });
+
+          createPopupText(box.x, box.y - 35, '☢ 放射能ドラム缶撃ち抜き! 全兵士HP+1(最大4) ☢', '#39d353');
+          createPopupText(player.x, player.y - 45, '⚠ WARNING: 敵兵士変異・耐久UP! ⚠', '#ffcc00');
         }
 
         supplyBoxes.splice(i, 1);
@@ -2556,6 +2638,7 @@
 
     // 敵の移動 & 判定
     const bigBoss = enemies.find(e => e.type === 'boss' && e.hp > 0);
+    const activeMidbosses = enemies.filter(e => e.type === 'midboss' && e.hp > 0);
     for (let i = enemies.length - 1; i >= 0; i--) {
       const e = enemies[i];
       e.y += e.vy;
@@ -2579,6 +2662,53 @@
         }
       }
 
+      // 中ボス(戦車)と兵士の重なり防止（戦車の車体で兵士を左右へ押し出し）
+      if (e.type === 'normal') {
+        for (const mb of activeMidbosses) {
+          const mbHalfW = mb.radius * 1.25;
+          const mbHalfH = mb.radius * 1.05;
+          if (Math.abs(e.x - mb.x) < mbHalfW + e.radius && Math.abs(e.y - mb.y) < mbHalfH + e.radius) {
+            if (e.x < mb.x) {
+              e.x = Math.max(ROAD.leftWall + e.radius, mb.x - mbHalfW - e.radius - 2);
+            } else {
+              e.x = Math.min(ROAD.rightWall - e.radius, mb.x + mbHalfW + e.radius + 2);
+            }
+          }
+        }
+      }
+
+      // 中ボス(戦車)の大ボス回避行動 & 重なり防止
+      if (e.type === 'midboss' && bigBoss) {
+        const detectW = bigBoss.radius * 1.6 + e.radius + 25;
+        const detectH = bigBoss.radius * 1.0 + e.radius + 35;
+        const distY = e.y - bigBoss.y;
+        const distX = e.x - bigBoss.x;
+
+        // 大ボス接近検知時に能動的回避操舵（左右へ進路変更）
+        if (Math.abs(distY) < detectH && Math.abs(distX) < detectW) {
+          if (e.x < bigBoss.x) {
+            e.vx = -Math.abs(e.vx || 0.35); // 左へ回避旋回
+            e.x -= 0.6;
+          } else {
+            e.vx = Math.abs(e.vx || 0.35);  // 右へ回避旋回
+            e.x += 0.6;
+          }
+        }
+
+        // 物理的接触・重なり防止（完全分離押し戻し）
+        const solidW = bigBoss.radius * 1.55 + e.radius + 6;
+        const solidH = bigBoss.radius * 0.95 + e.radius + 6;
+        if (Math.abs(distX) < solidW && Math.abs(distY) < solidH) {
+          if (e.x < bigBoss.x) {
+            e.x = Math.max(ROAD.leftWall + e.radius, bigBoss.x - solidW);
+            e.vx = -Math.abs(e.vx || 0.4);
+          } else {
+            e.x = Math.min(ROAD.rightWall - e.radius, bigBoss.x + solidW);
+            e.vx = Math.abs(e.vx || 0.4);
+          }
+        }
+      }
+
       // 弾丸との当たり判定（画面外上部の敵や弾丸なし時はスキップ）
       if (e.y >= -15 && bullets.length > 0) {
         for (let j = bullets.length - 1; j >= 0; j--) {
@@ -2595,12 +2725,9 @@
             e.hp -= b.damage;
             sfx.hit();
 
-            // ザコキャラの被弾変色 (黒 -> 灰 -> 白)
+            // ザコキャラの被弾変色 (銅色 -> 黒 -> 灰 -> 白)
             if (e.type === 'normal') {
-              const chp = Math.ceil(e.hp);
-              if (chp >= 3) e.colorType = 'black';
-              else if (chp === 2) e.colorType = 'gray';
-              else e.colorType = 'white';
+              e.colorType = getSoldierColorType(e.hp);
             }
 
             // スパーク
@@ -3469,11 +3596,111 @@
     ctx.restore();
   }
 
+  /* --- 放射能マーク（原子力標識 ☢ Trefoil）描画ヘルパー --- */
+  function drawRadiationSymbol(ctx, x, y, radius, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = color || '#000000';
+    // 中心円
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.23, 0, Math.PI * 2);
+    ctx.fill();
+    // 3枚の羽（60度幅 × 3）
+    const angles = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6];
+    const bladeSpan = Math.PI / 3;
+    for (const a of angles) {
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, a - bladeSpan / 2, a + bladeSpan / 2);
+      ctx.arc(0, 0, radius * 0.38, a + bladeSpan / 2, a - bladeSpan / 2, true);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   /* --- 補給ボックス（アイテム）描画 --- */
   function drawSupplyBoxes() {
     supplyBoxes.forEach(box => {
       ctx.save();
       ctx.translate(box.x, box.y + Math.sin(box.bob) * 3);
+
+      if (box.type === 'drum_can') {
+        const w = box.width; // 28
+        const h = box.height; // 34
+        const halfW = w / 2;
+        const halfH = h / 2;
+
+        // 1. ドラム缶本体（円筒グラデーション: 警戒黄色/濃黄色）
+        const grad = ctx.createLinearGradient(-halfW, 0, halfW, 0);
+        grad.addColorStop(0.0, '#9a7d0a');
+        grad.addColorStop(0.2, '#f1c40f');
+        grad.addColorStop(0.45, '#fff9d6');
+        grad.addColorStop(0.8, '#f39c12');
+        grad.addColorStop(1.0, '#7d6608');
+        ctx.fillStyle = grad;
+        ctx.strokeStyle = '#1a1f26';
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(-halfW, -halfH, w, h, 3);
+        } else {
+          ctx.rect(-halfW, -halfH, w, h);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // 2. ドラム缶のリブ（補強リング・3本の横帯バンド）
+        ctx.strokeStyle = 'rgba(26, 31, 38, 0.75)';
+        ctx.lineWidth = 1.5;
+        [-halfH + 8, 0, halfH - 8].forEach(ry => {
+          ctx.beginPath();
+          ctx.moveTo(-halfW, ry);
+          ctx.lineTo(halfW, ry);
+          ctx.stroke();
+          // ハイライトライン
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(-halfW + 1, ry - 1);
+          ctx.lineTo(halfW - 1, ry - 1);
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(26, 31, 38, 0.75)';
+          ctx.lineWidth = 1.5;
+        });
+
+        // 3. 上端・下端の金属リム（チャイム縁）
+        ctx.fillStyle = '#1a1f26';
+        ctx.fillRect(-halfW - 1, -halfH, w + 2, 2.5);
+        ctx.fillRect(-halfW - 1, halfH - 2.5, w + 2, 2.5);
+
+        // 4. 原子力マーク（放射能標識 ☢）
+        drawRadiationSymbol(ctx, 0, 0, 7.5, '#111111');
+
+        // 5. 警戒テキスト
+        ctx.fillStyle = '#111111';
+        ctx.font = 'bold 6.5px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('HAZARD', 0, -halfH + 4.5);
+
+        // 6. 耐久ゲージ
+        const barW = box.width;
+        const hpRatio = Math.max(0, box.hp / box.maxHp);
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(-barW / 2, -halfH - 8, barW, 4);
+        ctx.fillStyle = '#39d353';
+        ctx.fillRect(-barW / 2, -halfH - 8, barW * hpRatio, 4);
+
+        // 残りHP数字
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 8.5px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`☢️${Math.max(0, Math.ceil(box.hp))}HIT`, 0, -halfH - 13);
+
+        ctx.restore();
+        return;
+      }
 
       if (box.type === 'obstacle') {
         // 金属板障害物（防壁プレート）の3D水平回転描画
