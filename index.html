@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
   <title>RAMPART DEFENCE - 城塞防衛シューティング</title>
   <style>
     * {
@@ -11,7 +11,7 @@
       padding: 0;
       user-select: none;
       -webkit-user-select: none;
-      touch-action: manipulation;
+      touch-action: none;
     }
 
     body {
@@ -24,6 +24,10 @@
       align-items: center;
       height: 100vh;
       width: 100vw;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
     }
 
     #game-container {
@@ -37,6 +41,9 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     canvas {
@@ -47,6 +54,9 @@
       height: 100%;
       display: block;
       z-index: 1;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     /* 上部HUD */
@@ -398,6 +408,32 @@
       padding: 4px 8px;
       cursor: pointer;
     }
+
+    /* ポーズボタン */
+    .game-pause-btn {
+      position: absolute;
+      top: 10px;
+      right: 88px;
+      z-index: 20;
+      background: rgba(18, 24, 38, 0.85);
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 9px;
+      cursor: pointer;
+      display: none;
+      transition: all 0.15s ease;
+    }
+    .game-pause-btn:hover {
+      border-color: #58a6ff;
+      color: #58a6ff;
+      background: rgba(30, 40, 60, 0.95);
+    }
+    #game-container.playing .game-pause-btn {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -419,10 +455,11 @@
       <span class="hud-label">SCORE</span>
       <span class="hud-value" id="hudScore">0</span>
     </div>
-    <div class="hud-item" style="min-width: 68px; visibility: hidden;" aria-hidden="true"></div>
+    <div class="hud-item" style="min-width: 140px; visibility: hidden;" aria-hidden="true"></div>
   </div>
 
-  <!-- サウンドトグル -->
+  <!-- ポーズボタン & サウンドトグル -->
+  <button id="btnPauseGame" class="game-pause-btn" title="ポーズ / 一時停止 [Esc / START]">⏸ PAUSE</button>
   <button id="soundToggle" class="sound-toggle">🔊 ON</button>
 
   <!-- 操作用UIボタン群（プレイヤーライン直下: 左移動 / 攻撃一時停止 / ボム / 右移動） -->
@@ -467,6 +504,7 @@
       &nbsp;&nbsp;💣黒(全体1ダメ) / <span style="color:#ff4444;">💣赤(全体2ダメ/弾2発分)</span> ※ボス撃破で自動誘爆<br>
       ・<strong>コンテナ:</strong> <span style="color:#00ffcc">S</span>(弾強化/Lv.7レーザー10s) / <span style="color:#00f7ff">O</span>(オプション全基最大2列連射/4基時取得で特殊2基追加10s) / 💣(ボム) / 🛡️<strong>障害物</strong>(金属板/破壊で赤ボム+1000点)<br>
       ・<strong>ボス被弾:</strong> 中ボス砲弾＝弾orオプション1段階ダウン(ランダム) / 大ボスレーザー＝弾＆オプション両方1段階ダウン<br>
+      ・<strong>PAUSE [Esc / パッドSTART(OPTIONS) / ⏸]:</strong> 一時停止＆ゲーム終了確認<br>
       ・<strong>メニュー/パッド:</strong> [十字キー/矢印] 選択、[Enter/START/A] 即スタート
     </div>
   </div>
@@ -481,6 +519,18 @@
     <div style="display:flex; gap:12px; width:100%; max-width:320px;">
       <button id="btnRestart" class="btn-action" style="flex:1;">RETRY</button>
       <button id="btnMenu" class="btn-action" style="flex:1; background:linear-gradient(135deg, #30363d, #484f58);">MENU</button>
+    </div>
+  </div>
+
+  <!-- ポーズモーダル（ゲーム終了確認も兼ねる） -->
+  <div id="pauseModal" class="modal-overlay hidden">
+    <div class="game-title" style="color:#58a6ff;">PAUSE</div>
+    <div class="game-subtitle" style="font-size:14px; color:#e6edf3; margin-top:6px; margin-bottom:20px;">
+      ゲームが一時停止しています。<br>ゲームを終了してタイトルへ戻りますか？
+    </div>
+    <div style="display:flex; flex-direction:column; gap:12px; width:100%; max-width:280px;">
+      <button id="btnResume" class="btn-action" style="background:linear-gradient(135deg, #238636, #2ea043);">再開する [Esc / START]</button>
+      <button id="btnQuit" class="btn-action" style="background:linear-gradient(135deg, #da3633, #b62324);">終了してタイトルへ戻る</button>
     </div>
   </div>
 </div>
@@ -812,6 +862,10 @@
   const btnStart = document.getElementById('btnStart');
   const btnRestart = document.getElementById('btnRestart');
   const btnMenu = document.getElementById('btnMenu');
+  const pauseModal = document.getElementById('pauseModal');
+  const btnPauseGame = document.getElementById('btnPauseGame');
+  const btnResume = document.getElementById('btnResume');
+  const btnQuit = document.getElementById('btnQuit');
   const btnLeft = document.getElementById('btnLeft');
   const btnRight = document.getElementById('btnRight');
   const btnBomb = document.getElementById('btnBomb');
@@ -821,13 +875,14 @@
 
   let chosenDuration = 120; // デフォルト2分
   let chosenDensity = 'normal'; // 'normal' | 'hard' | 'expert' | 'mega'
-  let gameState = 'START'; // 'START' | 'PLAYING' | 'GAMEOVER' | 'CLEAR'
+  let gameState = 'START'; // 'START' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'CLEAR'
 
-  // メニュー画面・終了画面のキーボードナビゲーション用
+  // メニュー画面・終了画面・ポーズ画面のキーボードナビゲーション用
   let menuFocusRow = 0; // 0: プレイ時間, 1: 難易度, 2: GAME START
   let menuFocusTimeIdx = 0;
   let menuFocusDensityIdx = 0;
   let endFocusIdx = 0; // 0: RETRY, 1: MENU
+  let pauseFocusIdx = 0; // 0: 再開する, 1: 終了してタイトルへ戻る
 
   function updateMenuFocus() {
     timeBtns.forEach((b, i) => b.classList.toggle('focused', menuFocusRow === 0 && i === menuFocusTimeIdx));
@@ -838,6 +893,41 @@
   function updateEndFocus() {
     if (btnRestart) btnRestart.classList.toggle('focused', endFocusIdx === 0);
     if (btnMenu) btnMenu.classList.toggle('focused', endFocusIdx === 1);
+  }
+
+  function updatePauseFocus() {
+    if (btnResume) btnResume.classList.toggle('focused', pauseFocusIdx === 0);
+    if (btnQuit) btnQuit.classList.toggle('focused', pauseFocusIdx === 1);
+  }
+
+  function pauseGame() {
+    if (gameState !== 'PLAYING') return;
+    sfx.init();
+    gameState = 'PAUSED';
+    pauseFocusIdx = 0;
+    updatePauseFocus();
+    if (pauseModal) pauseModal.classList.remove('hidden');
+  }
+
+  function resumeGame() {
+    if (gameState !== 'PAUSED') return;
+    sfx.init();
+    gameState = 'PLAYING';
+    if (pauseModal) pauseModal.classList.add('hidden');
+    lastTime = performance.now();
+    accumulator = 0;
+  }
+
+  function quitToMenu() {
+    sfx.init();
+    if (pauseModal) pauseModal.classList.add('hidden');
+    if (endModal) endModal.classList.add('hidden');
+    if (startModal) startModal.classList.remove('hidden');
+    gameState = 'START';
+    targetPlayerX = null;
+    if (gameContainer) gameContainer.classList.remove('playing');
+    menuFocusRow = 0;
+    updateMenuFocus();
   }
 
   function initMenuFocus() {
@@ -1005,8 +1095,40 @@
       return;
     }
 
+    // 2.5 ポーズ画面での操作
+    if (gameState === 'PAUSED') {
+      if (e.code === 'Escape') {
+        resumeGame();
+        e.preventDefault();
+        return;
+      }
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+        pauseFocusIdx = 0; // 再開
+        updatePauseFocus();
+        e.preventDefault();
+      } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+        pauseFocusIdx = 1; // 終了
+        updatePauseFocus();
+        e.preventDefault();
+      } else if (e.code === 'Space' || e.code === 'Enter') {
+        sfx.init();
+        if (pauseFocusIdx === 0) {
+          resumeGame();
+        } else {
+          quitToMenu();
+        }
+        e.preventDefault();
+      }
+      return;
+    }
+
     // 3. ゲームプレイ中の操作
     if (gameState === 'PLAYING') {
+      if (e.code === 'Escape') {
+        pauseGame();
+        e.preventDefault();
+        return;
+      }
       if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
       if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
       if (e.code === 'Space') {
@@ -1087,6 +1209,7 @@
     bombPrev: false,
     pauseAttackPrev: false,
     startPrev: false,
+    startOptionsPrev: false,
     upPrev: false,
     downPrev: false,
     leftPrev: false,
@@ -1163,10 +1286,13 @@
     // 2.5 攻撃一時停止/再開: ボタン1 (B / ○ / ボムAボタンの右側) または ボタン5 (RB / R1)
     const isPauseAttackBtn = isGpButtonPressed(gp, 1) || isGpButtonPressed(gp, 5);
 
+    // 2.7 ポーズ/再開: スタート / OPTIONSボタン (ボタン9)
+    const isStartOptionsBtn = isGpButtonPressed(gp, 9);
+
     // 3. 決定/即スタート: ボタン0 (A / ×) または スタートボタン (ボタン9)
     const isConfirmBtn = isGpButtonPressed(gp, 0) || isGpButtonPressed(gp, 9);
 
-    if (isBombBtn || isPauseAttackBtn || isConfirmBtn || isLeft || isRight || isUp || isDown) {
+    if (isBombBtn || isPauseAttackBtn || isStartOptionsBtn || isConfirmBtn || isLeft || isRight || isUp || isDown) {
       sfx.init();
     }
 
@@ -1177,12 +1303,44 @@
 
     // ゲームプレイ中の操作
     if (gameState === 'PLAYING') {
+      // START / OPTIONS ボタンでポーズ
+      if (isStartOptionsBtn && !gpState.startOptionsPrev) {
+        pauseGame();
+        gpState.startOptionsPrev = true;
+        return;
+      }
       // コントローラー操作時は連射暴発を防ぐため、1回押して離すまで1回のみ発動判定
       if (isBombBtn && !gpState.bombPrev) {
         triggerBomb();
       }
       if (isPauseAttackBtn && !gpState.pauseAttackPrev) {
         toggleCeaseFire();
+      }
+    }
+
+    // ポーズ画面での操作
+    if (gameState === 'PAUSED') {
+      // START / OPTIONS ボタンで再開
+      if (isStartOptionsBtn && !gpState.startOptionsPrev) {
+        resumeGame();
+        gpState.startOptionsPrev = true;
+        return;
+      }
+      if (isUp && !gpState.upPrev) {
+        pauseFocusIdx = 0; // 再開
+        updatePauseFocus();
+      }
+      if (isDown && !gpState.downPrev) {
+        pauseFocusIdx = 1; // 終了
+        updatePauseFocus();
+      }
+      // ボタン0 (A / ×) で決定
+      if (isGpButtonPressed(gp, 0) && !gpState.bombPrev) {
+        if (pauseFocusIdx === 0) {
+          resumeGame();
+        } else {
+          quitToMenu();
+        }
       }
     }
 
@@ -1246,6 +1404,7 @@
     gpState.bombPrev = isBombBtn;
     gpState.pauseAttackPrev = isPauseAttackBtn;
     gpState.startPrev = isConfirmBtn;
+    gpState.startOptionsPrev = isStartOptionsBtn;
     gpState.upPrev = isUp;
     gpState.downPrev = isDown;
     gpState.leftPrev = isLeft;
@@ -1280,6 +1439,24 @@
     sfx.enabled = !sfx.enabled;
     soundToggle.innerText = sfx.enabled ? '🔊 ON' : '🔇 OFF';
   });
+
+  if (btnPauseGame) {
+    btnPauseGame.addEventListener('click', () => {
+      pauseGame();
+    });
+  }
+
+  if (btnResume) {
+    btnResume.addEventListener('click', () => {
+      resumeGame();
+    });
+  }
+
+  if (btnQuit) {
+    btnQuit.addEventListener('click', () => {
+      quitToMenu();
+    });
+  }
 
   /* --- ゲームワールド要素（城塞・防壁ステージ） --- */
   // 城塞フィールドの寸法（固定防衛戦のためスクロール停止）
@@ -1316,13 +1493,13 @@
   // オプション発射間隔（攻撃クールダウン）管理パラメータ
   // ==========================================
   // オプションの連射速度を一括管理・容易にチューニング可能とする定数
-  // 仕様: 自機の弾の発射間隔よりも50%間を空ける（自機の発射間隔 × 1.5倍）
+  // 仕様: 自機の弾の発射間隔よりも81%間を空ける（自機の発射間隔 × 1.81倍）
   // 自機本体の発射間隔: Lv2以上で6フレーム、Lv1で12フレーム (player.shootInterval)
   // オプション発射間隔:
-  //   Lv2以上: 6 × 1.5 = 9フレーム (自機6fより50%間隔を空ける)
-  //   Lv1:    12 × 1.5 = 18フレーム (自機12fより50%間隔を空ける)
+  //   Lv2以上: 6 × 1.81 ≒ 11フレーム
+  //   Lv1:    12 × 1.81 ≒ 22フレーム
   const OPTION_FIRE_INTERVAL = {
-    RATIO_TO_PLAYER: 1.5, // 自機比1.5倍（自機の弾よりも50%間を空ける）
+    RATIO_TO_PLAYER: 1.81, // 自機比1.81倍（自機の弾よりも81%間を空ける）
     get RATE_MULTIPLIER() { return this.RATIO_TO_PLAYER; },
     set RATE_MULTIPLIER(val) { this.RATIO_TO_PLAYER = val; },
     PLAYER_FAST: 6,       // 自機Lv2以上の基準発射間隔（6フレーム）
@@ -1333,10 +1510,10 @@
 
     // 適用される実インターバルフレーム数（自機発射間隔 × RATIO_TO_PLAYER）
     get FAST() {
-      return Math.round(this.PLAYER_FAST * this.RATIO_TO_PLAYER); // 6 × 1.5 = 9フレーム
+      return Math.round(this.PLAYER_FAST * this.RATIO_TO_PLAYER); // 6 × 1.81 ≒ 11フレーム
     },
     get NORMAL() {
-      return Math.round(this.PLAYER_NORMAL * this.RATIO_TO_PLAYER); // 12 × 1.5 = 18フレーム
+      return Math.round(this.PLAYER_NORMAL * this.RATIO_TO_PLAYER); // 12 × 1.81 ≒ 22フレーム
     },
     get fast() { return this.FAST; },
     get normal() { return this.NORMAL; }
@@ -1641,8 +1818,39 @@
     activeLaser = null;
     laserCooldown = 0;
     ceaseFireTimer = 0;
+    pendingBombEffects = [];
     updateCeaseFireUI();
     updateHUD();
+  }
+
+  // 連鎖誘爆キュー（中ボス撃破による黒ボム、大ボス撃破による赤ボムなど）
+  let pendingBombEffects = [];
+
+  // 敵撃破時の統一処理（スコア加算、爆発演出、ボス撃破時の連鎖誘爆キューイング）
+  function handleEnemyDefeat(e) {
+    if (!e || e.dead) return;
+    e.dead = true;
+    if (e.type === 'normal') {
+      score += (e.maxHp || 1) * 15;
+      sfx.explode();
+      if (zakoExplosions.length < 50) {
+        zakoExplosions.push({ x: Math.round(e.x), y: Math.round(e.y), frame: 1 });
+      }
+    } else if (e.type === 'midboss') {
+      score += 500;
+      screenShake = 16;
+      createExplosion(e.x, e.y, 45, '#ffaa00');
+      createPopupText(e.x, e.y, '+500 中ボス撃破！', '#ffd700');
+      // 中ボス撃破時: 黒ボム(画面全体に弾1発分)と同じ効果を誘爆発動！
+      pendingBombEffects.push({ type: 'black', text: '⚡ 中ボス爆破：黒ボム誘爆(全体1ダメ)！' });
+    } else if (e.type === 'boss') {
+      score += 2000;
+      screenShake = 28;
+      createExplosion(e.x, e.y, 70, '#ff3300');
+      createPopupText(e.x, e.y, '+2000 移動城塞撃破！', '#ff3333');
+      // 大ボス撃破時: 赤ボム(画面全体に弾2発分)と同じ効果を誘爆発動！
+      pendingBombEffects.push({ type: 'red', text: '💥 移動城塞爆破：赤ボム全域誘爆(全体2ダメ)！' });
+    }
   }
 
   // ボム効果適用ヘルパー（プレイヤー発動・ボス爆破時誘爆共通）
@@ -1673,11 +1881,7 @@
         e.hp -= damage;
         if (e.hp <= 0) {
           if (!e.dead) {
-            e.dead = true;
-            score += e.maxHp * 15;
-            if (zakoExplosions.length < 50) {
-              zakoExplosions.push({ x: Math.round(e.x), y: Math.round(e.y), frame: 1 });
-            }
+            handleEnemyDefeat(e);
           }
         } else {
           // 被弾変色: 銅色 -> 黒 -> 灰 -> 白
@@ -1689,9 +1893,7 @@
         e.hp -= dmg;
         createPopupText(e.x, e.y - 30, `-${dmg} (${isRed ? 'RED BOMB' : 'BLACK BOMB'})`, isRed ? '#ff4444' : '#ffcc00');
         if (e.hp <= 0 && !e.dead) {
-          e.dead = true;
-          score += 500;
-          createExplosion(e.x, e.y, e.radius * 1.5, '#ffaa00');
+          handleEnemyDefeat(e);
         }
       } else if (e.type === 'boss') {
         // 大ボスへのダメージ: 黒ボムは40ダメ、赤ボムは120ダメ
@@ -1699,9 +1901,7 @@
         e.hp -= dmg;
         createPopupText(e.x, e.y - 45, `-${dmg} (${isRed ? 'RED BOMB' : 'BLACK BOMB'})`, isRed ? '#ff4444' : '#ff3333');
         if (e.hp <= 0 && !e.dead) {
-          e.dead = true;
-          score += 2000;
-          createExplosion(e.x, e.y, e.radius * 2, '#ff3300');
+          handleEnemyDefeat(e);
         }
       }
     });
@@ -1724,11 +1924,14 @@
       }
     });
 
-    // 注意: ここで supplyBoxes/enemies を直接 filter 再代入すると
-    // update() ループ中のインデックスが破綻するため行わず、正規ループで一括削除する。
-
     if (sourceText) {
       createPopupText(GAME_WIDTH / 2, GAME_HEIGHT * 0.42, sourceText, isRed ? '#ff4444' : '#ffffff');
+    }
+
+    // 連鎖誘爆の順次処理（中ボス撃破による黒ボム誘爆、大ボス撃破による赤ボム誘爆）
+    while (pendingBombEffects.length > 0) {
+      const nextBomb = pendingBombEffects.shift();
+      triggerBombEffect(nextBomb.type, nextBomb.text);
     }
   }
 
@@ -2357,7 +2560,7 @@
 
     // オプション独立射撃（仕様: オプションの弾は全て最大2列まで）
     // 自機Lv1: 1列, 自機Lv2以上: 2列（全基最大2列）
-    // 発射間隔（クールダウン）は定数 OPTION_FIRE_INTERVAL（自機の弾よりも50%間を空ける＝1.5倍）で一括管理
+    // 発射間隔（クールダウン）は定数 OPTION_FIRE_INTERVAL（自機の弾よりも81%間を空ける＝1.81倍）で一括管理
     if (player.optionsCount > 0 && !isStunned && !isCeaseFire) {
       optionShootCooldown--;
       if (optionShootCooldown <= 0) {
@@ -2700,10 +2903,24 @@
         const solidH = bigBoss.radius * 0.95 + e.radius + 6;
         if (Math.abs(distX) < solidW && Math.abs(distY) < solidH) {
           if (e.x < bigBoss.x) {
-            e.x = Math.max(ROAD.leftWall + e.radius, bigBoss.x - solidW);
+            const minSafeMbX = ROAD.leftWall + e.radius + 4;
+            if (bigBoss.x - solidW < minSafeMbX) {
+              e.x = minSafeMbX;
+              bigBoss.x = Math.max(bigBoss.x, minSafeMbX + solidW);
+              bigBoss.vx = Math.abs(bigBoss.vx || 0.25); // 大ボスを右へ退避旋回
+            } else {
+              e.x = bigBoss.x - solidW;
+            }
             e.vx = -Math.abs(e.vx || 0.4);
           } else {
-            e.x = Math.min(ROAD.rightWall - e.radius, bigBoss.x + solidW);
+            const maxSafeMbX = ROAD.rightWall - e.radius - 4;
+            if (bigBoss.x + solidW > maxSafeMbX) {
+              e.x = maxSafeMbX;
+              bigBoss.x = Math.min(bigBoss.x, maxSafeMbX - solidW);
+              bigBoss.vx = -Math.abs(bigBoss.vx || 0.25); // 大ボスを左へ退避旋回
+            } else {
+              e.x = bigBoss.x + solidW;
+            }
             e.vx = Math.abs(e.vx || 0.4);
           }
         }
@@ -2767,28 +2984,7 @@
       // 敵撃破
       if (e.hp <= 0) {
         if (!e.dead) {
-          e.dead = true;
-          if (e.type === 'normal') {
-            score += e.maxHp * 15;
-            sfx.explode();
-            if (zakoExplosions.length < 50) {
-              zakoExplosions.push({ x: Math.round(e.x), y: Math.round(e.y), frame: 1 });
-            }
-          } else if (e.type === 'midboss') {
-            score += 500;
-            screenShake = 14;
-            createExplosion(e.x, e.y, 45, '#ffaa00');
-            createPopupText(e.x, e.y, '+500 中ボス撃破！', '#ffd700');
-            // 中ボス爆破時: 黒ボム(画面全体に弾1発分)と同じ効果を誘爆発動！
-            triggerBombEffect('black', '⚡ 中ボス爆破：黒ボム誘爆(全体1ダメ)！');
-          } else if (e.type === 'boss') {
-            score += 2000;
-            screenShake = 26;
-            createExplosion(e.x, e.y, 70, '#ff3300');
-            createPopupText(e.x, e.y, '+2000 移動城塞撃破！', '#ff3333');
-            // 大ボス爆破時: 赤ボム(画面全体に弾2発分)と同じ効果を誘爆発動！
-            triggerBombEffect('red', '💥 移動城塞爆破：赤ボム全域誘爆(全体2ダメ)！');
-          }
+          handleEnemyDefeat(e);
         }
         enemies.splice(i, 1);
         continue;
@@ -2806,18 +3002,18 @@
       }
     }
 
+    // 連鎖誘爆の順次処理（中ボス撃破による黒ボム誘爆、大ボス撃破による赤ボム誘爆）
+    while (pendingBombEffects.length > 0) {
+      const nextBomb = pendingBombEffects.shift();
+      triggerBombEffect(nextBomb.type, nextBomb.text);
+    }
+
     // ボム等の全体効果でHPが0以下になった残りの敵を一括安全クリーンアップ
     for (let i = enemies.length - 1; i >= 0; i--) {
       const e = enemies[i];
       if (e.hp <= 0) {
         if (!e.dead) {
-          e.dead = true;
-          if (e.type === 'normal') {
-            score += e.maxHp * 15;
-            if (zakoExplosions.length < 50) {
-              zakoExplosions.push({ x: Math.round(e.x), y: Math.round(e.y), frame: 1 });
-            }
-          }
+          handleEnemyDefeat(e);
         }
         enemies.splice(i, 1);
       }
@@ -4580,6 +4776,23 @@
   requestAnimationFrame(gameLoop);
 
 })();
+</script>
+
+<script>
+  // ダブルタップによる拡大・ズームの防止（300ms以内の連続タップをe.preventDefault()で抑止）
+  let lastTouchEndTime = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = performance.now();
+    if (now - lastTouchEndTime <= 300) {
+      e.preventDefault();
+    }
+    lastTouchEndTime = now;
+  }, { passive: false });
+
+  // iOS Safari等のピンチズームジェスチャーを抑止
+  document.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+  }, { passive: false });
 </script>
 
 </body>
